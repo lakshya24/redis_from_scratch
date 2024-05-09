@@ -1,6 +1,7 @@
 import asyncio
 import socket
 
+from app.handler.arg_parser import RedisServerArgs
 from app.processor.command import CommandProcessor, Echo, Ping
 
 PING = "*1\r\n$4\r\nping\r\n"
@@ -20,10 +21,10 @@ async def handle_response(client: socket.socket, addr):
             await loop.sock_sendall(client, resp)
 
 
-async def main_with_event_loop() -> None:
+async def main_with_event_loop(server_args: RedisServerArgs) -> None:
     print("Logs from your program will appear here!")
     server_socket: socket.socket = socket.create_server(
-        ("localhost", 6379), reuse_port=True
+        ("localhost", server_args.port), reuse_port=True
     )
     server_socket.setblocking(False)
     server_socket.listen()

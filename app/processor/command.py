@@ -19,7 +19,7 @@ class CommandProcessor(ABC):
         commands = command.split("\r\n")
         # skip bulk strings
         commands = [c for c in commands if c and not c.startswith(("$", "*"))]
-        command_to_exec: str = commands[0].strip()
+        command_to_exec: str = commands[0].strip().upper()
         args = commands[1:]
         if command_to_exec == "ECHO":
             return Echo(args)
@@ -29,6 +29,8 @@ class CommandProcessor(ABC):
             return Get(args)
         elif command_to_exec == "SET":
             return Set(args)
+        elif command_to_exec == "TYPE":
+            return Type(args)
 
 
 class Ping(CommandProcessor):
@@ -84,3 +86,14 @@ class Get(CommandProcessor):
 
     def __init__(self, message) -> None:
         self.message = message
+
+
+class Type(CommandProcessor):
+    def __init__(self, message) -> None:
+        self.message = message
+
+    def response(self) -> bytes:
+        lookup_key: str = self.message[0]
+        if kvPair.has(lookup_key):
+            return b"+string\r\n"
+        return b"+none\r\n"
