@@ -3,6 +3,7 @@ from typing import Literal
 from typing import List
 from app.storage.storage import Entry, kvPair
 from typing import Optional
+import time
 
 
 class CommandProcessor(ABC):
@@ -47,30 +48,39 @@ class Echo(CommandProcessor):
 
 class Set(CommandProcessor):
     def response(self) -> bytes:
-        if not isinstance(self.message, list):
-            raise Exception(f"cannot process {self.message}")
-        if len(self.message) < 2:
-            raise Exception(f"malfprmed key vals {self.message}")
-        key: str = self.message[0]
-        val: str = self.message[1]
-        val_len = len(val)
-        entry: Entry = Entry(val, val_len)
-        kvPair.add(key, entry)
+
+        val_len = len(self.val)
+        entry: Entry = Entry(self.val, val_len, self.px)
+        kvPair.add(self.key, entry)
         return b"+OK\r\n"
 
     def __init__(self, message) -> None:
         self.message = message
+        if not isinstance(self.message, list):
+            raise Exception(f"cannot process {self.message}")
+        if len(self.message) < 2:
+            raise Exception(f"malfprmed key vals {self.message}")
+        self.key: str = self.message[0]
+        self.val: str = self.message[1]
+        if len(self.message) > 3:
+            self.px = int(self.message[3])
+        else:
+            self.px = None
 
 
 class Get(CommandProcessor):
     def response(self) -> bytes:
-        self.message = "".join(self.message)
-        val: Optional[Entry] = kvPair.get(self.message)
-
+        key: str = "".join(self.message)
+        val: Optional[Entry] = kvPair.get(key)
         if val:
-            return f"${val.len}\r\n{val.value}\r\n".encode()
-        else:
-            return b"$-1\r\n"
+            found_ttl_ms: float = val.ttl_ms
+            curr_ttl_ms: float = time.time() * 1000
+            delta = curr_ttl_ms - found_ttl_ms
+            if delta <= 0 or val.infinite_alive:
+                return f"${val.len}\r\n{val.value}\r\n".encode()
+            else:
+                kvPair.remove(key)
+        return b"$-1\r\n"
 
     def __init__(self, message) -> None:
         self.message = message
