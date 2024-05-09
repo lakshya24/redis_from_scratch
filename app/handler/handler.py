@@ -1,6 +1,8 @@
 import asyncio
 import socket
 
+from app.processor.command import CommandProcessor, Echo, Ping
+
 PING = "*1\r\n$4\r\nping\r\n"
 PONG = "+PONG\r\n"
 
@@ -10,7 +12,12 @@ async def handle_response(client: socket.socket, addr):
     loop = asyncio.get_event_loop()
     while req := await loop.sock_recv(client, 1024):
         print("Received request", req, client)
-        await loop.sock_sendall(client, PONG.encode())
+        command: Echo | Ping | None = CommandProcessor.parse(req)
+        if command:
+            print(f"Got command as : {command}")
+            resp = command.response()
+            print(f"Got response as : {resp}")
+            await loop.sock_sendall(client, resp)
 
 
 async def main_with_event_loop() -> None:
