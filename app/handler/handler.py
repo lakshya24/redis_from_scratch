@@ -12,7 +12,7 @@ async def handle_response(client: socket.socket, addr):
     loop = asyncio.get_event_loop()
     while req := await loop.sock_recv(client, 1024):
         print("Received request", req, client)
-        command: Echo | Ping | None = CommandProcessor.parse(req)
+        command = CommandProcessor.parse(req)
         if command:
             print(f"Got command as : {command}")
             resp = command.response()
