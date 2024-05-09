@@ -3,13 +3,22 @@ import time
 
 
 class Entry:
-    def __init__(self, value: str, len: int, ttl: Optional[int]):
-        self.value: str = value
+    def __init__(
+        self,
+        value,
+        len: int,
+        ttl: Optional[int] = None,
+        type: str = "string",
+        stream_id:Optional[str]=None,
+    ):
+        self.value = value
         self.len: int = len
         self.ttl_ms: float = (time.time() * 1000) + ttl if ttl else 0.0
         self.infinite_alive: bool = not ttl
+        self.type: str = type
+        self.stream_id: Optional[str] = stream_id
 
-    def print(self):
+    def print(self) -> None:
         print(f"value is {self.value}, len is: {self.len}")
 
 

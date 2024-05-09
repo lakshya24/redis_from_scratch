@@ -31,6 +31,8 @@ class CommandProcessor(ABC):
             return Set(args)
         elif command_to_exec == "TYPE":
             return Type(args)
+        elif command_to_exec == "XADD":
+            return Xadd(args)
 
 
 class Ping(CommandProcessor):
@@ -94,6 +96,29 @@ class Type(CommandProcessor):
 
     def response(self) -> bytes:
         lookup_key: str = self.message[0]
-        if kvPair.has(lookup_key):
-            return b"+string\r\n"
+        val: Optional[Entry] = kvPair.get(lookup_key)
+        if val:
+            return f"+{val.type}\r\n".encode()
         return b"+none\r\n"
+
+
+class Xadd(CommandProcessor):
+    def __init__(self, message) -> None:
+        self.message = message
+        print(f"list is: {self.message}")
+        if not isinstance(self.message, list):
+            raise Exception(f"cannot process {self.message}")
+        if len(self.message) < 4:
+            raise Exception(f"malformed key vals {self.message}")
+        self.stream_key: str = self.message[0]
+        self.stream_id: str = self.message[1]
+        self.kv_pairs = self.message[2:]
+
+    def response(self) -> bytes:
+        val_len = len(self.kv_pairs)
+        entry: Entry = Entry(
+            self.kv_pairs, val_len, ttl=None, type="stream", stream_id=self.stream_id
+        )
+        kvPair.add(self.stream_key, entry)
+        print(f"dict is {kvPair._storage.keys()}")
+        return f"+{self.stream_id}\r\n".encode()
