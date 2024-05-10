@@ -264,14 +264,10 @@ class XRange(CommandProcessor):
 class XRead(CommandProcessor):
     def __init__(self, message) -> None:
         self.message = message
-        print(f"got message = {message}")
         self.stream_keys = []
         self.stream_start = []
-        for i in range(0, len(self.message), 2):
-            self.stream_keys.append(self.message[i])
-            self.stream_start.append(self.message[i + 1])
-        # self.stream_keys: List[str] = self.message[: len(self.message) / 2]
-        # self.stream_start: List[str] = [_ for _ in self.message[len(self.message) / 2 :]]
+        self.stream_keys: List[str] = self.message[: (len(self.message) // 2)]
+        self.stream_start: List[str] = self.message[(len(self.message) // 2) :]
 
     def response(self) -> bytes:
         flattened_stream: List = []
