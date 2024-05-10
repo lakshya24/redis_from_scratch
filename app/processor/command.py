@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Tuple
 from app.processor.resp_coder import RespCoder
 from app.storage.storage import Entry, RespDatatypes, StreamEntry, kvPair
 from typing import Optional
@@ -27,7 +27,7 @@ class CommandProcessor(ABC):
     @classmethod
     def parse(cls, input: bytes):
         command = input.decode()
-        commands: List[str] = command.split("\r\n")
+        commands: List[str] = command.split(RespCoder.TERMINATOR)
         # all everything now including bulk strings
         command_to_exec: str = commands[2].strip().upper()
         # adjust to only extract command params from the format (len,param)
@@ -51,7 +51,7 @@ class CommandProcessor(ABC):
 
 class Ping(CommandProcessor):
     def response(self) -> bytes:
-        return b"+PONG\r\n"
+        return f"+PONG{RespCoder.TERMINATOR}".encode()
 
 
 class Echo(CommandProcessor):
@@ -70,7 +70,7 @@ class Set(CommandProcessor):
         val_len = len(self.val)
         entry: Entry = Entry(self.val, val_len, self.px)
         kvPair.add(self.key, entry)
-        return b"+OK\r\n"
+        return f"+OK{RespCoder.TERMINATOR}".encode()
 
     def __init__(self, message) -> None:
         self.message = message
@@ -95,10 +95,10 @@ class Get(CommandProcessor):
             curr_ttl_ms: float = time.time() * 1000
             delta = curr_ttl_ms - found_ttl_ms
             if delta <= 0 or val.infinite_alive:
-                return f"${val.len}\r\n{val.value}\r\n".encode()
+                return f"${val.len}{RespCoder.TERMINATOR}{val.value}{RespCoder.TERMINATOR}".encode()
             else:
                 kvPair.remove(key)
-        return b"$-1\r\n"
+        return f"$-1{RespCoder.TERMINATOR}".encode()
 
     def __init__(self, message) -> None:
         self.message = message
@@ -112,8 +112,8 @@ class Type(CommandProcessor):
         lookup_key: str = self.message[0]
         val: Optional[Entry] = kvPair.get(lookup_key)
         if val:
-            return f"+{val.type}\r\n".encode()
-        return b"+none\r\n"
+            return f"+{val.type}{RespCoder.TERMINATOR}".encode()
+        return f"+none{RespCoder.TERMINATOR}".encode()
 
 
 class Xadd(CommandProcessor):
@@ -129,7 +129,7 @@ class Xadd(CommandProcessor):
     def response(self) -> bytes:
         stream_id = self.stream_params[0]
         if stream_id == "0-0":
-            return "-ERR The ID specified in XADD must be greater than 0-0\r\n".encode()
+            return f"-ERR The ID specified in XADD must be greater than 0-0{RespCoder.TERMINATOR}".encode()
         sentry_key: str = self.stream_params[1]
         sentry_val: str = self.stream_params[2]
         return self._update_entry(stream_id, sentry_key, sentry_val)
@@ -148,12 +148,12 @@ class Xadd(CommandProcessor):
                 )
                 curr_id: str = stream_entry.stream_id
                 if curr_id <= last_id:
-                    return f"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".encode()
+                    return f"-ERR The ID specified in XADD is equal or smaller than the target stream top item{RespCoder.TERMINATOR}".encode()
                 else:
                     print(f"stream_entry generated for next row = {stream_entry}")
                     data.value.append(stream_entry)
             else:
-                return "+Not a valid stream key\r\n".encode()
+                return f"+Not a valid stream key{RespCoder.TERMINATOR}".encode()
         else:
             ## This is equivalent to creating the cache entry for given key for the first time
             stream_entry: StreamEntry = self._get_stream_entry(
@@ -164,7 +164,7 @@ class Xadd(CommandProcessor):
             )
             kvPair.add(self.stream_key, entry)
             curr_id: str = stream_entry.stream_id
-        return f"+{curr_id}\r\n".encode()
+        return f"+{curr_id}{RespCoder.TERMINATOR}".encode()
 
     def _get_stream_entry(
         self,
@@ -222,26 +222,39 @@ class XRange(CommandProcessor):
         self.message = message
         self.stream_key: str = self.message[0]
         self.args: List[str] = self.message[1:] if len(self.message) >= 2 else []
-        self.start_range: str = "0-1"
-        self.end_range: str = f"{sys.maxsize}-{sys.maxsize}"
-        if len(self.args) > 0:
-            self.start_range = self.args[0]
-            self.end_range = self.args[1]
 
     def response(self) -> bytes:
         entries: List[StreamEntry] = []
         if data := kvPair.get(self.stream_key):
             if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
-                entries = [entry for entry in data.value if self._is_in_range(entry)]
+                start_range, end_range = self._find_range(data.value)
+                entries = [
+                    entry
+                    for entry in data.value
+                    if self._is_in_range(entry, start_range, end_range)
+                ]
                 flatenned_entries: List = self._flatten_entries(entries)
                 return RespCoder.encode(flatenned_entries).encode()
             else:
-                return "+Not a valid stream key\r\n".encode()
+                return f"+Not a valid stream key{RespCoder.TERMINATOR}".encode()
         return "[]".encode()
 
-    def _is_in_range(self, entry: StreamEntry) -> bool:
+    def _find_range(self, data: List[StreamEntry]) -> Tuple[str, str]:
+        default_start_range: str = "0-1"
+        default_end_range: str = f"{sys.maxsize}-{sys.maxsize}"
+        if len(self.args) > 0:
+            start_range: str = (
+                data[0].stream_id if self.args[0] == "-" else self.args[0]
+            )
+            end_range: str = self.args[1]
+            return start_range, end_range
+        return default_start_range, default_end_range
+
+    def _is_in_range(
+        self, entry: StreamEntry, start_range: str, end_range: str
+    ) -> bool:
         stream_id: str = entry.stream_id
-        return stream_id >= self.start_range and stream_id <= self.end_range
+        return stream_id >= start_range and stream_id <= end_range
 
     def _flatten_entries(self, entries: List[StreamEntry]) -> List:
         def flatten_entry(entry: StreamEntry) -> List:
@@ -252,10 +265,10 @@ class XRange(CommandProcessor):
 
     def _encode(self, data: List | str) -> str:
         if isinstance(data, str):
-            return f"${len(data)}\r\n{data}\r\n"
+            return f"${len(data)}{RespCoder.TERMINATOR}{data}{RespCoder.TERMINATOR}"
         elif isinstance(data, list):
             encoded_str = []
             for entry in data:
                 encoded_str.append(self._encode(entry))
             joined_str = "".join(encoded_str)
-            return f"*{len(encoded_str)}\r\n{joined_str}"
+            return f"*{len(encoded_str)}{RespCoder.TERMINATOR}{joined_str}"
