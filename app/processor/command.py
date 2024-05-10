@@ -280,7 +280,7 @@ class XRead(CommandProcessor):
         return RespCoder.encode(flattened_stream).encode()
 
     def _process_one_stream(self, stream_key: str, stream_start: str) -> List:
-        print(f"processing {stream_key}")
+        print(f"processing stream_key: {stream_key}")
         if data := kvPair.get(stream_key):
             if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
                 start_range, end_range = self._find_range(stream_start, data.value)
