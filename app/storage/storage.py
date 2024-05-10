@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import enum
 from typing import Optional
 import time
 
@@ -12,13 +13,18 @@ class StreamEntry:
         self.entry_value = entry_value
 
 
+class RespDatatypes(enum.Enum):
+    STRING = "string"
+    STREAM = "stream"
+
+
 class Entry:
     def __init__(
         self,
         value,
         len: int,
         ttl: Optional[int] = None,
-        type: str = "string",
+        type: str = RespDatatypes.STRING.value,
         stream_id: Optional[str] = None,
     ) -> None:
         self.value = value
