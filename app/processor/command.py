@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Literal
 from typing import List
 from app.storage.storage import Entry, StreamEntry, kvPair
 from typing import Optional
@@ -114,24 +113,94 @@ class Xadd(CommandProcessor):
         self.stream_params: List[str] = self.message[1:]
 
     def response(self) -> bytes:
+        stream_id: List[str] = self.stream_params[0].split("-")
+        sentry_t_ms: str = stream_id[0]
+        sentry_seq: str = stream_id[1]
+        if self._generate_entry_id(sentry_t_ms, sentry_seq) == "0-0":
+            return "-ERR The ID specified in XADD must be greater than 0-0\r\n".encode()
+        sentry_key: str = self.stream_params[1]
+        sentry_val: str = self.stream_params[2]
+        return self._update_entry(sentry_t_ms, sentry_seq, sentry_key, sentry_val)
+
+    def _generate_entry_id(self, sentry_t_ms, sentry_seq):
+        return f"{sentry_t_ms}-{sentry_seq}"
+
+    def _update_entry(
+        self, sentry_t_ms: str, sentry_seq: str, sentry_key: str, sentry_val: str
+    ) -> bytes:
+        # TODO: Fix this len logic to something more reasonable
         val_len = 2
-        stream_entry: StreamEntry = StreamEntry(
-            self.stream_params[0], self.stream_params[1], self.stream_params[2]
-        )
-        stream_values: List[StreamEntry] = [stream_entry]
-        entry: Entry = Entry(stream_values, val_len, ttl=None, type="stream")
+        curr_id = self._generate_entry_id(sentry_t_ms, sentry_seq)
         if data := kvPair.get(self.stream_key):
-            if isinstance(data.value, list):
-                last_id: str = data.value[-1].entry_id
-                entry_id: str = stream_entry.entry_id
-                if entry_id == "0-0":
-                    return "-ERR The ID specified in XADD must be greater than 0-0\r\n".encode()
-                elif entry_id <= last_id:
+            # handles the logic where key is found and it a valid stream
+            if data.type == "stream" and isinstance(data.value, list):
+                last_entry: StreamEntry = data.value[-1]
+                last_id: str = f"{last_entry.t_ms}-{last_entry.seq}"
+                stream_entry: StreamEntry = self._get_stream_entry(
+                    sentry_t_ms, sentry_seq, sentry_key, sentry_val, last_entry
+                )
+                curr_id: str = self._generate_entry_id(
+                    stream_entry.t_ms, stream_entry.seq
+                )
+                if curr_id <= last_id:
                     return f"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".encode()
                 else:
+                    print(f"stream_entry generated for next row = {stream_entry}")
                     data.value.append(stream_entry)
             else:
                 return "+Not a valid stream key\r\n".encode()
         else:
+            ## This is equivalent to creating the cache entry for given key for the first time
+            stream_entry: StreamEntry = self._get_stream_entry(
+                sentry_t_ms, sentry_seq, sentry_key, sentry_val, None
+            )
+            entry: Entry = Entry([stream_entry], val_len, ttl=None, type="stream")
             kvPair.add(self.stream_key, entry)
-        return f"+{stream_entry.entry_id}\r\n".encode()
+            curr_id: str = self._generate_entry_id(stream_entry.t_ms, stream_entry.seq)
+        return f"+{curr_id}\r\n".encode()
+
+    def _get_stream_entry(
+        self,
+        sentry_t_ms: str,
+        sentry_seq: str,
+        sentry_key: str,
+        sentry_val: str,
+        curr_entry: Optional[StreamEntry],
+    ) -> StreamEntry:
+        """
+        This function handles the next seq generation based on :
+        - if the initial key does not exist
+            use the default sequence key [1 if sentry_t_ms == "0" else 0 ] id sentry_seq == "*" else sentry_seq
+        - if key exists in cache:
+            if provide seq == *:
+                generate next seq by incrementing sequence of last key if t_ms is same else just use the previous deafults
+            else:
+                use the sentry_seq provided
+        ### Args:
+            - `sentry_t_ms (str)`: _description_
+            - `sentry_seq (str)`: _description_
+            - `sentry_key (str)`: _description_
+            - `sentry_val (str)`: _description_
+            - `curr_entry (Optional[StreamEntry])`: _description_
+
+        ### Returns:
+            - `StreamEntry`: newly generated stream sequence
+        """
+        default_seq: int = 1 if sentry_t_ms == "0" else 0
+        if not curr_entry:
+            return StreamEntry(
+                t_ms=sentry_t_ms,
+                seq=default_seq if sentry_seq == "*" else int(sentry_seq),
+                entry_key=sentry_key,
+                entry_value=sentry_val,
+            )
+        else:
+            curr_t_ms: str = curr_entry.t_ms
+            curr_seq: int = curr_entry.seq
+            next_seq = default_seq if curr_t_ms != sentry_t_ms else curr_seq + 1
+            return StreamEntry(
+                t_ms=sentry_t_ms,
+                seq=int(sentry_seq) if sentry_seq != "*" else next_seq,
+                entry_key=sentry_key,
+                entry_value=sentry_val,
+            )

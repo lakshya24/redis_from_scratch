@@ -1,10 +1,13 @@
+from dataclasses import dataclass
 from typing import Optional
 import time
 
 
+@dataclass
 class StreamEntry:
-    def __init__(self, entry_id, entry_key, entry_value) -> None:
-        self.entry_id = entry_id
+    def __init__(self, t_ms, seq, entry_key, entry_value) -> None:
+        self.t_ms = t_ms
+        self.seq = seq
         self.entry_key = entry_key
         self.entry_value = entry_value
 
@@ -17,7 +20,7 @@ class Entry:
         ttl: Optional[int] = None,
         type: str = "string",
         stream_id: Optional[str] = None,
-    ):
+    ) -> None:
         self.value = value
         self.len: int = len
         self.ttl_ms: float = (time.time() * 1000) + ttl if ttl else 0.0
