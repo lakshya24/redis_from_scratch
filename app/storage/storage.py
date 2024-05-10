@@ -2,6 +2,13 @@ from typing import Optional
 import time
 
 
+class StreamEntry:
+    def __init__(self, entry_id, entry_key, entry_value) -> None:
+        self.entry_id = entry_id
+        self.entry_key = entry_key
+        self.entry_value = entry_value
+
+
 class Entry:
     def __init__(
         self,
@@ -9,14 +16,14 @@ class Entry:
         len: int,
         ttl: Optional[int] = None,
         type: str = "string",
-        stream_id:Optional[str]=None,
+        stream_id: Optional[str] = None,
     ):
         self.value = value
         self.len: int = len
         self.ttl_ms: float = (time.time() * 1000) + ttl if ttl else 0.0
         self.infinite_alive: bool = not ttl
         self.type: str = type
-        self.stream_id: Optional[str] = stream_id
+        # self.stream_id: Optional[str] = stream_id
 
     def print(self) -> None:
         print(f"value is {self.value}, len is: {self.len}")

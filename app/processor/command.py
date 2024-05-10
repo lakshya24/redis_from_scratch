@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Literal
 from typing import List
-from app.storage.storage import Entry, kvPair
+from app.storage.storage import Entry, StreamEntry, kvPair
 from typing import Optional
 import time
 
@@ -111,14 +111,27 @@ class Xadd(CommandProcessor):
         if len(self.message) < 4:
             raise Exception(f"malformed key vals {self.message}")
         self.stream_key: str = self.message[0]
-        self.stream_id: str = self.message[1]
-        self.kv_pairs = self.message[2:]
+        self.stream_params: List[str] = self.message[1:]
 
     def response(self) -> bytes:
-        val_len = len(self.kv_pairs)
-        entry: Entry = Entry(
-            self.kv_pairs, val_len, ttl=None, type="stream", stream_id=self.stream_id
+        val_len = 2
+        stream_entry: StreamEntry = StreamEntry(
+            self.stream_params[0], self.stream_params[1], self.stream_params[2]
         )
-        kvPair.add(self.stream_key, entry)
-        print(f"dict is {kvPair._storage.keys()}")
-        return f"+{self.stream_id}\r\n".encode()
+        stream_values: List[StreamEntry] = [stream_entry]
+        entry: Entry = Entry(stream_values, val_len, ttl=None, type="stream")
+        if data := kvPair.get(self.stream_key):
+            if isinstance(data.value, list):
+                last_id: str = data.value[-1].entry_id
+                entry_id: str = stream_entry.entry_id
+                if entry_id == "0-0":
+                    return "-ERR The ID specified in XADD must be greater than 0-0\r\n".encode()
+                elif entry_id <= last_id:
+                    return f"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".encode()
+                else:
+                    data.value.append(stream_entry)
+            else:
+                return "+Not a valid stream key\r\n".encode()
+        else:
+            kvPair.add(self.stream_key, entry)
+        return f"+{stream_entry.entry_id}\r\n".encode()
