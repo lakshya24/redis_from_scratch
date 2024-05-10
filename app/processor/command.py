@@ -228,6 +228,7 @@ class XRange(CommandProcessor):
         if data := kvPair.get(self.stream_key):
             if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
                 start_range, end_range = self._find_range(data.value)
+                print(f"query range is : {start_range} to {end_range}")
                 entries = [
                     entry
                     for entry in data.value
@@ -246,7 +247,7 @@ class XRange(CommandProcessor):
             start_range: str = (
                 data[0].stream_id if self.args[0] == "-" else self.args[0]
             )
-            end_range: str = self.args[1]
+            end_range: str = data[-1].stream_id if self.args[1] == "+" else self.args[1]
             return start_range, end_range
         return default_start_range, default_end_range
 
@@ -267,7 +268,7 @@ class XRange(CommandProcessor):
         if isinstance(data, str):
             return f"${len(data)}{RespCoder.TERMINATOR}{data}{RespCoder.TERMINATOR}"
         elif isinstance(data, list):
-            encoded_str = []
+            encoded_str: List = []
             for entry in data:
                 encoded_str.append(self._encode(entry))
             joined_str = "".join(encoded_str)
