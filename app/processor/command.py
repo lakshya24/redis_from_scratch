@@ -16,6 +16,7 @@ class Command(enum.Enum):
     TYPE = enum.auto()
     XADD = enum.auto()
     XRANGE = enum.auto()
+    XREAD = enum.auto()
 
 
 class CommandProcessor(ABC):
@@ -47,6 +48,8 @@ class CommandProcessor(ABC):
             return Xadd(args)
         elif command_to_exec == Command.XRANGE.name:
             return XRange(args)
+        elif command_to_exec == Command.XREAD.name:
+            return XRead(args[1:])
 
 
 class Ping(CommandProcessor):
@@ -234,7 +237,7 @@ class XRange(CommandProcessor):
                     for entry in data.value
                     if self._is_in_range(entry, start_range, end_range)
                 ]
-                flatenned_entries: List = self._flatten_entries(entries)
+                flatenned_entries: List = [entry.flattenned_entry for entry in entries]
                 return RespCoder.encode(flatenned_entries).encode()
             else:
                 return f"+Not a valid stream key{RespCoder.TERMINATOR}".encode()
@@ -257,19 +260,56 @@ class XRange(CommandProcessor):
         stream_id: str = entry.stream_id
         return stream_id >= start_range and stream_id <= end_range
 
-    def _flatten_entries(self, entries: List[StreamEntry]) -> List:
-        def flatten_entry(entry: StreamEntry) -> List:
-            stream_id: str = entry.stream_id
-            return [f"{stream_id}", [entry.entry_key, entry.entry_value]]
 
-        return [flatten_entry(entry) for entry in entries]
+class XRead(CommandProcessor):
+    def __init__(self, message) -> None:
+        self.message = message
+        print(f"got message = {message}")
+        self.stream_keys = []
+        self.stream_start = []
+        for i in range(0, len(self.message), 2):
+            self.stream_keys.append(self.message[i])
+            self.stream_start.append(self.message[i + 1])
+        # self.stream_keys: List[str] = self.message[: len(self.message) / 2]
+        # self.stream_start: List[str] = [_ for _ in self.message[len(self.message) / 2 :]]
 
-    def _encode(self, data: List | str) -> str:
-        if isinstance(data, str):
-            return f"${len(data)}{RespCoder.TERMINATOR}{data}{RespCoder.TERMINATOR}"
-        elif isinstance(data, list):
-            encoded_str: List = []
-            for entry in data:
-                encoded_str.append(self._encode(entry))
-            joined_str = "".join(encoded_str)
-            return f"*{len(encoded_str)}{RespCoder.TERMINATOR}{joined_str}"
+    def response(self) -> bytes:
+        flattened_stream: List = []
+        for stream_key, stream_start in zip(self.stream_keys, self.stream_start):
+            flattened_stream.append(self._process_one_stream(stream_key, stream_start))
+        return RespCoder.encode(flattened_stream).encode()
+
+    def _process_one_stream(self, stream_key: str, stream_start: str) -> List:
+        if data := kvPair.get(stream_key):
+            if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
+                start_range, end_range = self._find_range(stream_start, data.value)
+                print(f"query range is : {start_range} to {end_range}")
+                entries = [
+                    entry
+                    for entry in data.value
+                    if self._is_in_range(entry, start_range, end_range)
+                ]
+                flatenned_entries: List = [entry.flattenned_entry for entry in entries]
+                return [stream_key, flatenned_entries]
+            else:
+                return [f"Not a valid stream key"]
+        return []
+
+    def _find_range(
+        self,
+        stream_start: str,
+        data: List[StreamEntry],
+    ) -> Tuple[str, str]:
+        start_range: str = stream_start
+        end_range: str = data[-1].stream_id
+        if stream_start == "-":
+            start_range = "0-1"
+        elif len(stream_start) == 1:
+            start_range = f"{stream_start}-0"
+        return start_range, end_range
+
+    def _is_in_range(
+        self, entry: StreamEntry, start_range: str, end_range: str
+    ) -> bool:
+        stream_id: str = entry.stream_id
+        return stream_id >= start_range and stream_id <= end_range

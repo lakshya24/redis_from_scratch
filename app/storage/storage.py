@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import enum
-from typing import Optional
+from typing import List, Optional
 import time
 
 
@@ -12,6 +12,10 @@ class StreamEntry:
         self.entry_key = entry_key
         self.entry_value = entry_value
         self.stream_id: str = f"{self.t_ms}-{self.seq}"
+        self.flattenned_entry: List = [
+            f"{self.stream_id}",
+            [self.entry_key, self.entry_value],
+        ]
 
 
 class RespDatatypes(enum.Enum):
