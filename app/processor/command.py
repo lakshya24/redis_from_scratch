@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import List
+from app.processor.resp_coder import RespCoder
 from app.storage.storage import Entry, RespDatatypes, StreamEntry, kvPair
 from typing import Optional
 import time
 import enum
+import sys
 
 
 class Command(enum.Enum):
@@ -13,10 +15,10 @@ class Command(enum.Enum):
     GET = enum.auto()
     TYPE = enum.auto()
     XADD = enum.auto()
+    XRANGE = enum.auto()
 
 
 class CommandProcessor(ABC):
-    TERMINATOR: str = "\r\n"
 
     @abstractmethod
     def response(self) -> bytes:
@@ -43,6 +45,8 @@ class CommandProcessor(ABC):
             return Type(args)
         elif command_to_exec == Command.XADD.name:
             return Xadd(args)
+        elif command_to_exec == Command.XRANGE.name:
+            return XRange(args)
 
 
 class Ping(CommandProcessor):
@@ -54,7 +58,7 @@ class Echo(CommandProcessor):
     def response(self) -> bytes:
         if isinstance(self.message, list):
             self.message = "".join(self.message)
-        return f"+{self.message}\r\n".encode()
+        return f"+{self.message}{RespCoder.TERMINATOR}".encode()
 
     def __init__(self, message) -> None:
         self.message = message
@@ -130,9 +134,6 @@ class Xadd(CommandProcessor):
         sentry_val: str = self.stream_params[2]
         return self._update_entry(stream_id, sentry_key, sentry_val)
 
-    def _generate_entry_id(self, sentry_t_ms, sentry_seq):
-        return f"{sentry_t_ms}-{sentry_seq}"
-
     def _update_entry(self, stream_id: str, sentry_key: str, sentry_val: str) -> bytes:
         # TODO: Fix this len logic to something more reasonable
         val_len = 2
@@ -145,9 +146,7 @@ class Xadd(CommandProcessor):
                 stream_entry: StreamEntry = self._get_stream_entry(
                     stream_id, sentry_key, sentry_val, last_entry
                 )
-                curr_id: str = self._generate_entry_id(
-                    stream_entry.t_ms, stream_entry.seq
-                )
+                curr_id: str = stream_entry.stream_id
                 if curr_id <= last_id:
                     return f"-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".encode()
                 else:
@@ -164,7 +163,7 @@ class Xadd(CommandProcessor):
                 [stream_entry], val_len, ttl=None, type=RespDatatypes.STREAM.value
             )
             kvPair.add(self.stream_key, entry)
-            curr_id: str = self._generate_entry_id(stream_entry.t_ms, stream_entry.seq)
+            curr_id: str = stream_entry.stream_id
         return f"+{curr_id}\r\n".encode()
 
     def _get_stream_entry(
@@ -216,3 +215,47 @@ class Xadd(CommandProcessor):
                 entry_key=sentry_key,
                 entry_value=sentry_val,
             )
+
+
+class XRange(CommandProcessor):
+    def __init__(self, message) -> None:
+        self.message = message
+        self.stream_key: str = self.message[0]
+        self.args: List[str] = self.message[1:] if len(self.message) >= 2 else []
+        self.start_range: str = "0-1"
+        self.end_range: str = f"{sys.maxsize}-{sys.maxsize}"
+        if len(self.args) > 0:
+            self.start_range = self.args[0]
+            self.end_range = self.args[1]
+
+    def response(self) -> bytes:
+        entries: List[StreamEntry] = []
+        if data := kvPair.get(self.stream_key):
+            if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
+                entries = [entry for entry in data.value if self._is_in_range(entry)]
+                flatenned_entries: List = self._flatten_entries(entries)
+                return RespCoder.encode(flatenned_entries).encode()
+            else:
+                return "+Not a valid stream key\r\n".encode()
+        return "[]".encode()
+
+    def _is_in_range(self, entry: StreamEntry) -> bool:
+        stream_id: str = entry.stream_id
+        return stream_id >= self.start_range and stream_id <= self.end_range
+
+    def _flatten_entries(self, entries: List[StreamEntry]) -> List:
+        def flatten_entry(entry: StreamEntry) -> List:
+            stream_id: str = entry.stream_id
+            return [f"{stream_id}", [entry.entry_key, entry.entry_value]]
+
+        return [flatten_entry(entry) for entry in entries]
+
+    def _encode(self, data: List | str) -> str:
+        if isinstance(data, str):
+            return f"${len(data)}\r\n{data}\r\n"
+        elif isinstance(data, list):
+            encoded_str = []
+            for entry in data:
+                encoded_str.append(self._encode(entry))
+            joined_str = "".join(encoded_str)
+            return f"*{len(encoded_str)}\r\n{joined_str}"

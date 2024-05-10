@@ -11,6 +11,7 @@ class StreamEntry:
         self.seq = seq
         self.entry_key = entry_key
         self.entry_value = entry_value
+        self.stream_id: str = f"{self.t_ms}-{self.seq}"
 
 
 class RespDatatypes(enum.Enum):
