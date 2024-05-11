@@ -2,7 +2,12 @@ import asyncio
 import socket
 from typing import Optional
 
-from app.handler.master_sync_handelr import ping_master, psync_master, replconf_master
+from app.handler.master_sync_handelr import (
+    ping_master,
+    psync_master,
+    replconf_master,
+    get_master_connection,
+)
 from app.handler.server_conf import ServerInfo
 from app.processor.command import CommandProcessor
 
