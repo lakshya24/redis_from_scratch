@@ -1,6 +1,6 @@
 import asyncio
 
-from app.processor.command import PING_REQUEST_BYTES
+from app.processor.resp_coder import PING_REQUEST_BYTES
 
 
 async def get_master_connection(

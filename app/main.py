@@ -1,6 +1,4 @@
 # Uncomment this to pass the first stage
-from argparse import ArgumentParser, Namespace
-import socket
 import asyncio
 
 from app.handler.server_conf import ServerInfo, get_server_info, get_args_parser

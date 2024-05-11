@@ -1,3 +1,4 @@
+import enum
 from typing import List, LiteralString
 
 
@@ -19,3 +20,9 @@ class RespCoder:
     @classmethod
     def encode_as_simple_str(cls, data: str) -> str:
         return f"${len(data)}{cls.TERMINATOR}{data}{cls.TERMINATOR}"
+     
+PING_REQUEST_STR: str = "ping"
+PING_REQUEST_BYTES: bytes = (
+    f"*1{RespCoder.TERMINATOR}${len(PING_REQUEST_STR)}{RespCoder.TERMINATOR}{PING_REQUEST_STR}{RespCoder.TERMINATOR}".encode()
+)
+EMPTY_BYTE:bytes = b''

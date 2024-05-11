@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
 import asyncio
+import base64
 from dataclasses import asdict
 from typing import List, Tuple
 from app.handler.server_conf import ServerInfo
-from app.processor.resp_coder import RespCoder
+from app.processor.resp_coder import EMPTY_BYTE, RespCoder
 from app.storage.storage import (
     STREAM_CONDITIONALS,
     STREAM_LOCK,
@@ -17,10 +18,10 @@ import time
 import enum
 import sys
 
-PING_REQUEST_STR: str = "ping"
-PING_REQUEST_BYTES: bytes = (
-    f"*1{RespCoder.TERMINATOR}${len(PING_REQUEST_STR)}{RespCoder.TERMINATOR}{PING_REQUEST_STR}{RespCoder.TERMINATOR}".encode()
-)
+
+class FollowupCode(enum.Enum):
+    NO_FOLLOWUP = 0
+    SEND_RDB = 1
 
 
 class Command(enum.Enum):
@@ -40,7 +41,7 @@ class Command(enum.Enum):
 class CommandProcessor(ABC):
 
     @abstractmethod
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         pass
 
     @classmethod
@@ -79,28 +80,44 @@ class CommandProcessor(ABC):
             return XRead(args)
 
 
+async def get_followup_response(followup_code: FollowupCode) -> bytes:
+    match followup_code:
+        case FollowupCode.NO_FOLLOWUP:
+            return EMPTY_BYTE
+        case FollowupCode.SEND_RDB:
+            return await Psync.rdb_sync()
+    return EMPTY_BYTE
+
+
 class Ping(CommandProcessor):
-    async def response(self) -> bytes:
-        return f"+PONG{RespCoder.TERMINATOR}".encode()
+    async def response(self) -> Tuple[bytes, bytes]:
+        return f"+PONG{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
 
 class Echo(CommandProcessor):
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         if isinstance(self.message, list):
             self.message = "".join(self.message)
-        return f"+{self.message}{RespCoder.TERMINATOR}".encode()
+        return (
+            f"+{self.message}{RespCoder.TERMINATOR}".encode(),
+            await get_followup_response(FollowupCode.NO_FOLLOWUP),
+        )
 
     def __init__(self, message) -> None:
         self.message = message
 
 
 class Set(CommandProcessor):
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
 
         val_len = len(self.val)
         entry: Entry = Entry(self.val, val_len, self.px)
         kvPair.add(self.key, entry)
-        return f"+OK{RespCoder.TERMINATOR}".encode()
+        return f"+OK{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
     def __init__(self, message) -> None:
         self.message = message
@@ -117,7 +134,7 @@ class Set(CommandProcessor):
 
 
 class Get(CommandProcessor):
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         key: str = "".join(self.message)
         val: Optional[Entry] = kvPair.get(key)
         if val:
@@ -125,10 +142,14 @@ class Get(CommandProcessor):
             curr_ttl_ms: float = time.time() * 1000
             delta = curr_ttl_ms - found_ttl_ms
             if delta <= 0 or val.infinite_alive:
-                return f"${val.len}{RespCoder.TERMINATOR}{val.value}{RespCoder.TERMINATOR}".encode()
+                return f"${val.len}{RespCoder.TERMINATOR}{val.value}{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+                    FollowupCode.NO_FOLLOWUP
+                )
             else:
                 kvPair.remove(key)
-        return f"$-1{RespCoder.TERMINATOR}".encode()
+        return f"$-1{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
     def __init__(self, message) -> None:
         self.message = message
@@ -138,12 +159,17 @@ class Type(CommandProcessor):
     def __init__(self, message) -> None:
         self.message = message
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         lookup_key: str = self.message[0]
         val: Optional[Entry] = kvPair.get(lookup_key)
         if val:
-            return f"+{val.type}{RespCoder.TERMINATOR}".encode()
-        return f"+none{RespCoder.TERMINATOR}".encode()
+            return (
+                f"+{val.type}{RespCoder.TERMINATOR}".encode(),
+                await get_followup_response(FollowupCode.NO_FOLLOWUP),
+            )
+        return f"+none{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
 
 class Info(CommandProcessor):
@@ -152,7 +178,7 @@ class Info(CommandProcessor):
         self.server_info: ServerInfo = message[0]
         self.info_keys = ["role", "master_replid", "master_repl_offset"]
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         print(f"info messag is : {self.server_info}")
         info_data: str = ""
         server_info = asdict(self.server_info)
@@ -160,7 +186,9 @@ class Info(CommandProcessor):
             val = str(server_info[key])
             info: str = f"{key}:{val}{RespCoder.TERMINATOR}"
             info_data += info
-        return RespCoder.encode_as_simple_str(info_data).encode()
+        return RespCoder.encode_as_simple_str(
+            info_data
+        ).encode(), await get_followup_response(FollowupCode.NO_FOLLOWUP)
 
 
 class Replconf(CommandProcessor):
@@ -169,26 +197,43 @@ class Replconf(CommandProcessor):
     def __init__(self, message) -> None:
         self.server_info: ServerInfo = message[0]
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         print(f"Replconf request on master")
-        return self.OK_RESPONSE.encode()
+        return self.OK_RESPONSE.encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
 
 class Psync(CommandProcessor):
     FULLRESYNC: str = "FULLRESYNC"
+    EMPTY_RDB_FILE = b"UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog=="
 
     def __init__(self, message) -> None:
         self.server_info: ServerInfo = message[0]
         self.args: List = message[1]
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         print(f"Psync request on master....")
         if (len(self.args) < 2) or (self.args[0] != "?" and self.args[1] != "-1"):
             print("Invalid psync request")
-            return f"+ERR Invalid PSNC request with params {self.args[0]} and {self.args[1]}".encode()
+            return f"+ERR Invalid PSNC request with params {self.args[0]} and {self.args[1]}".encode(), await get_followup_response(
+                FollowupCode.NO_FOLLOWUP
+            )
         master_replid: str = self.server_info.master_replid
         master_repl_offset: str = str(self.server_info.master_repl_offset)
-        return f"+{self.FULLRESYNC} {master_replid} {master_repl_offset}{RespCoder.TERMINATOR}".encode()
+        return f"+{self.FULLRESYNC} {master_replid} {master_repl_offset}{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+            FollowupCode.SEND_RDB
+        )
+
+    @classmethod
+    async def rdb_sync(cls) -> bytes:
+        with open(kvPair.rdb_file, "r") as f:
+            print("[*****] parsing file...")
+            rdb_content = base64.b64decode(cls.EMPTY_RDB_FILE)
+            rdb_length = len(rdb_content)
+            response: bytes = f"${rdb_length}\r\n".encode("utf-8") + rdb_content
+            print(f"PSYNC Command response: {response}")
+            return response
 
 
 class Xadd(CommandProcessor):
@@ -201,13 +246,17 @@ class Xadd(CommandProcessor):
         self.stream_key: str = self.message[0]
         self.stream_params: List[str] = self.message[1:]
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         stream_id = self.stream_params[0]
         if stream_id == "0-0":
-            return f"-ERR The ID specified in XADD must be greater than 0-0{RespCoder.TERMINATOR}".encode()
+            return f"-ERR The ID specified in XADD must be greater than 0-0{RespCoder.TERMINATOR}".encode(), await get_followup_response(
+                FollowupCode.NO_FOLLOWUP
+            )
         sentry_key: str = self.stream_params[1]
         sentry_val: str = self.stream_params[2]
-        return await self._update_entry(stream_id, sentry_key, sentry_val)
+        return await self._update_entry(
+            stream_id, sentry_key, sentry_val
+        ), await get_followup_response(FollowupCode.NO_FOLLOWUP)
 
     async def _update_entry(
         self, stream_id: str, sentry_key: str, sentry_val: str
@@ -311,7 +360,7 @@ class XRange(CommandProcessor):
         self.stream_key: str = self.message[0]
         self.args: List[str] = self.message[1:] if len(self.message) >= 2 else []
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         entries: List[StreamEntry] = []
         if data := kvPair.get(self.stream_key):
             if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
@@ -323,10 +372,15 @@ class XRange(CommandProcessor):
                     if self._is_in_range(entry, start_range, end_range)
                 ]
                 flatenned_entries: List = [entry.flattenned_entry for entry in entries]
-                return RespCoder.encode(flatenned_entries).encode()
+                return RespCoder.encode(
+                    flatenned_entries
+                ).encode(), await get_followup_response(FollowupCode.NO_FOLLOWUP)
             else:
-                return f"+Not a valid stream key{RespCoder.TERMINATOR}".encode()
-        return "[]".encode()
+                return (
+                    f"+Not a valid stream key{RespCoder.TERMINATOR}".encode(),
+                    await get_followup_response(FollowupCode.NO_FOLLOWUP),
+                )
+        return "[]".encode(), await get_followup_response(FollowupCode.NO_FOLLOWUP)
 
     def _find_range(self, data: List[StreamEntry]) -> Tuple[str, str]:
         default_start_range: str = "0-1"
@@ -358,7 +412,7 @@ class XRead(CommandProcessor):
         self.stream_keys: List[str] = streams[: (len(streams) // 2)]
         self.stream_start: List[str] = streams[(len(streams) // 2) :]
 
-    async def response(self) -> bytes:
+    async def response(self) -> Tuple[bytes, bytes]:
         flattened_stream: List = []
         for stream_key, stream_start in zip(self.stream_keys, self.stream_start):
             flatenned_stream_for_key: List = [stream_key]
@@ -384,12 +438,17 @@ class XRead(CommandProcessor):
                 next_stream_start: str = f"{last_entry.t_ms}-{next_seq}"
                 entries = await self._process_one_stream(stream_key, next_stream_start)
                 if len(entries) == 0:
-                    return RespCoder.NULL_BULK_STRING_BYTES
+                    return (
+                        RespCoder.NULL_BULK_STRING_BYTES,
+                        await get_followup_response(FollowupCode.NO_FOLLOWUP),
+                    )
 
             flatenned_entries: List = [entry.flattenned_entry for entry in entries]
             flatenned_stream_for_key.append(flatenned_entries)
             flattened_stream.append(flatenned_stream_for_key)
-        return RespCoder.encode(flattened_stream).encode()
+        return RespCoder.encode(flattened_stream).encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
     async def _process_one_stream(self, stream_key: str, stream_start: str) -> List:
         print(f"processing stream_key: {stream_key} with stream_start: {stream_start}")

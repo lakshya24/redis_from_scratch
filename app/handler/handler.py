@@ -20,9 +20,13 @@ async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
         command: Optional[CommandProcessor] = CommandProcessor.parse(req, server_info)
         if command:
             print(f"Got command as : {command}")
-            resp: bytes = await command.response()
+            resp, followup = await command.response()
             print(f"Got response as : {resp}")
             await loop.sock_sendall(client, resp)
+            print(f"followup bytes: {followup}")
+            if followup:
+                print("[*****] no win followup")
+                await loop.sock_sendall(client, followup)
 
 
 async def init_as_slave(server_args: ServerInfo) -> None:

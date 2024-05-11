@@ -45,8 +45,9 @@ class Entry:
 
 
 class Storage:
-    def __init__(self) -> None:
+    def __init__(self,rdb_file:str) -> None:
         self._storage: dict[str, Entry] = {}
+        self.rdb_file = rdb_file
 
     def add(self, key: str, entry_dict: Entry) -> None:
         self._storage[key] = entry_dict
@@ -67,6 +68,6 @@ class Storage:
         del self._storage[key]
 
 
-kvPair: Storage = Storage()
+kvPair: Storage = Storage("app/storage/resources/rdb.hex")
 STREAM_LOCK = asyncio.Lock()
 STREAM_CONDITIONALS = {}
