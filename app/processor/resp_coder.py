@@ -3,6 +3,7 @@ from typing import List, LiteralString
 
 class RespCoder:
     TERMINATOR: str = "\r\n"
+    NULL_BULK_STRING_BYTES: bytes = b"$-1\r\n"
 
     @classmethod
     def encode(cls, data: List | str) -> str:

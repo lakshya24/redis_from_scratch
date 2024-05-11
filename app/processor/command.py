@@ -1,7 +1,15 @@
 from abc import ABC, abstractmethod
+import asyncio
 from typing import List, Tuple
 from app.processor.resp_coder import RespCoder
-from app.storage.storage import Entry, RespDatatypes, StreamEntry, kvPair
+from app.storage.storage import (
+    STREAM_CONDITIONALS,
+    STREAM_LOCK,
+    Entry,
+    RespDatatypes,
+    StreamEntry,
+    kvPair,
+)
 from typing import Optional
 import time
 import enum
@@ -22,7 +30,7 @@ class Command(enum.Enum):
 class CommandProcessor(ABC):
 
     @abstractmethod
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         pass
 
     @classmethod
@@ -49,16 +57,16 @@ class CommandProcessor(ABC):
         elif command_to_exec == Command.XRANGE.name:
             return XRange(args)
         elif command_to_exec == Command.XREAD.name:
-            return XRead(args[1:])
+            return XRead(args)
 
 
 class Ping(CommandProcessor):
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         return f"+PONG{RespCoder.TERMINATOR}".encode()
 
 
 class Echo(CommandProcessor):
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         if isinstance(self.message, list):
             self.message = "".join(self.message)
         return f"+{self.message}{RespCoder.TERMINATOR}".encode()
@@ -68,7 +76,7 @@ class Echo(CommandProcessor):
 
 
 class Set(CommandProcessor):
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
 
         val_len = len(self.val)
         entry: Entry = Entry(self.val, val_len, self.px)
@@ -90,7 +98,7 @@ class Set(CommandProcessor):
 
 
 class Get(CommandProcessor):
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         key: str = "".join(self.message)
         val: Optional[Entry] = kvPair.get(key)
         if val:
@@ -111,7 +119,7 @@ class Type(CommandProcessor):
     def __init__(self, message) -> None:
         self.message = message
 
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         lookup_key: str = self.message[0]
         val: Optional[Entry] = kvPair.get(lookup_key)
         if val:
@@ -129,15 +137,17 @@ class Xadd(CommandProcessor):
         self.stream_key: str = self.message[0]
         self.stream_params: List[str] = self.message[1:]
 
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         stream_id = self.stream_params[0]
         if stream_id == "0-0":
             return f"-ERR The ID specified in XADD must be greater than 0-0{RespCoder.TERMINATOR}".encode()
         sentry_key: str = self.stream_params[1]
         sentry_val: str = self.stream_params[2]
-        return self._update_entry(stream_id, sentry_key, sentry_val)
+        return await self._update_entry(stream_id, sentry_key, sentry_val)
 
-    def _update_entry(self, stream_id: str, sentry_key: str, sentry_val: str) -> bytes:
+    async def _update_entry(
+        self, stream_id: str, sentry_key: str, sentry_val: str
+    ) -> bytes:
         # TODO: Fix this len logic to something more reasonable
         val_len = 2
         curr_id: str = ""
@@ -155,6 +165,7 @@ class Xadd(CommandProcessor):
                 else:
                     print(f"stream_entry generated for next row = {stream_entry}")
                     data.value.append(stream_entry)
+                    await self._notify_stream_add(self.stream_key)
             else:
                 return f"+Not a valid stream key{RespCoder.TERMINATOR}".encode()
         else:
@@ -166,8 +177,18 @@ class Xadd(CommandProcessor):
                 [stream_entry], val_len, ttl=None, type=RespDatatypes.STREAM.value
             )
             kvPair.add(self.stream_key, entry)
+            await self._notify_stream_add(self.stream_key)
             curr_id: str = stream_entry.stream_id
         return f"+{curr_id}{RespCoder.TERMINATOR}".encode()
+
+    async def _notify_stream_add(self, stream_key) -> None:
+        async with STREAM_LOCK:
+            print(f"stream_conditionals: {STREAM_CONDITIONALS}")
+            # Notify all the waiting XREAD commands for this key
+            if stream_key in STREAM_CONDITIONALS:
+                async with STREAM_CONDITIONALS[stream_key]:
+                    print(f"Notify all waiting XREAD commands for key: {stream_key}")
+                    STREAM_CONDITIONALS[stream_key].notify_all()
 
     def _get_stream_entry(
         self,
@@ -226,7 +247,7 @@ class XRange(CommandProcessor):
         self.stream_key: str = self.message[0]
         self.args: List[str] = self.message[1:] if len(self.message) >= 2 else []
 
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         entries: List[StreamEntry] = []
         if data := kvPair.get(self.stream_key):
             if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
@@ -263,20 +284,51 @@ class XRange(CommandProcessor):
 
 class XRead(CommandProcessor):
     def __init__(self, message) -> None:
-        self.message = message
+        self.message: List[str] = message
+        print(f"got xread args:{self.message}")
+        self.is_blocking: bool = True if message[0].lower() == "block" else False
+        self.block_wait_s: int = int(message[1]) // 1000 if self.is_blocking else -1
         self.stream_keys = []
         self.stream_start = []
-        self.stream_keys: List[str] = self.message[: (len(self.message) // 2)]
-        self.stream_start: List[str] = self.message[(len(self.message) // 2) :]
+        streams: List[str] = message[3:] if self.is_blocking else self.message[1:]
+        self.stream_keys: List[str] = streams[: (len(streams) // 2)]
+        self.stream_start: List[str] = streams[(len(streams) // 2) :]
 
-    def response(self) -> bytes:
+    async def response(self) -> bytes:
         flattened_stream: List = []
         for stream_key, stream_start in zip(self.stream_keys, self.stream_start):
-            flattened_stream.append(self._process_one_stream(stream_key, stream_start))
+            flatenned_stream_for_key: List = [stream_key]
+
+            entries: List = await self._process_one_stream(stream_key, stream_start)
+            last_entry: StreamEntry = entries[-1]
+            if self.is_blocking:
+                ## Handle the case of blocking reads where in case of infitine timeouts - we discard all entries until next one
+                ## or, wait for a specified time before grabbing next entries
+                print(f"enabling blocking mode with timeout: {self.block_wait_s} sec")
+                if self.block_wait_s == 0:
+                    condition = None
+                    async with STREAM_LOCK:
+                        condition = asyncio.Condition()
+                        STREAM_CONDITIONALS[stream_key] = condition
+                    async with condition:
+                        await condition.wait()
+
+                else:
+                    await asyncio.sleep(self.block_wait_s)
+                entries.clear()
+                next_seq: int = last_entry.seq + 1
+                next_stream_start: str = f"{last_entry.t_ms}-{next_seq}"
+                entries = await self._process_one_stream(stream_key, next_stream_start)
+                if len(entries) == 0:
+                    return RespCoder.NULL_BULK_STRING_BYTES
+
+            flatenned_entries: List = [entry.flattenned_entry for entry in entries]
+            flatenned_stream_for_key.append(flatenned_entries)
+            flattened_stream.append(flatenned_stream_for_key)
         return RespCoder.encode(flattened_stream).encode()
 
-    def _process_one_stream(self, stream_key: str, stream_start: str) -> List:
-        print(f"processing stream_key: {stream_key}")
+    async def _process_one_stream(self, stream_key: str, stream_start: str) -> List:
+        print(f"processing stream_key: {stream_key} with stream_start: {stream_start}")
         if data := kvPair.get(stream_key):
             if data.type == RespDatatypes.STREAM.value and isinstance(data.value, list):
                 start_range, end_range = self._find_range(stream_start, data.value)
@@ -286,8 +338,7 @@ class XRead(CommandProcessor):
                     for entry in data.value
                     if self._is_in_range(entry, start_range, end_range)
                 ]
-                flatenned_entries: List = [entry.flattenned_entry for entry in entries]
-                return [stream_key, flatenned_entries]
+                return entries
             else:
                 return [f"Not a valid stream key"]
         return []

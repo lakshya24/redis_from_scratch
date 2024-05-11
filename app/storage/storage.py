@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 import enum
 from typing import List, Optional
@@ -67,3 +68,5 @@ class Storage:
 
 
 kvPair: Storage = Storage()
+STREAM_LOCK = asyncio.Lock()
+STREAM_CONDITIONALS = {}

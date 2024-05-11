@@ -1,11 +1,9 @@
 import asyncio
 import socket
+from typing import Optional
 
 from app.handler.arg_parser import RedisServerArgs
-from app.processor.command import CommandProcessor, Echo, Ping
-
-PING = "*1\r\n$4\r\nping\r\n"
-PONG = "+PONG\r\n"
+from app.processor.command import CommandProcessor
 
 
 async def handle_response(client: socket.socket, addr):
@@ -13,10 +11,10 @@ async def handle_response(client: socket.socket, addr):
     loop = asyncio.get_event_loop()
     while req := await loop.sock_recv(client, 1024):
         print("Received request", req, client)
-        command = CommandProcessor.parse(req)
+        command: Optional[CommandProcessor] = CommandProcessor.parse(req)
         if command:
             print(f"Got command as : {command}")
-            resp = command.response()
+            resp: bytes = await command.response()
             print(f"Got response as : {resp}")
             await loop.sock_sendall(client, resp)
 
