@@ -137,7 +137,7 @@ class Info(CommandProcessor):
     def __init__(self, message) -> None:
 
         self.server_info: ServerInfo = message[0]
-        self.info_keys = ["role"]
+        self.info_keys = ["role", "master_replid", "master_repl_offset"]
 
     async def response(self) -> bytes:
         print(f"info messag is : {self.server_info}")

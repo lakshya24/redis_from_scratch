@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 from argparse import ArgumentParser, Namespace
+import random
+import string
 
 
 @dataclass
@@ -8,6 +10,8 @@ class ServerInfo:
     role: str
     master_address: str
     master_port: int
+    master_replid: str
+    master_repl_offset: int
 
 
 def get_args_parser() -> ArgumentParser:
@@ -24,6 +28,7 @@ def get_args_parser() -> ArgumentParser:
 def get_server_info() -> ServerInfo:
     parsed_args: Namespace = get_args_parser().parse_args()
     master_address, master_port, role = None, None, "master"
+    master_replid, master_repl_offset = generate_random_string(40), 0
     if parsed_args.replicaof:
         master_address, master_port = parsed_args.replicaof
         role = "slave"
@@ -38,4 +43,12 @@ def get_server_info() -> ServerInfo:
         role=role,
         master_address=master_address,
         master_port=master_port,
+        master_replid=master_replid,
+        master_repl_offset=master_repl_offset,
     )
+
+
+def generate_random_string(length: int = 10) -> str:
+    characters = string.ascii_letters + string.digits
+    random_string = "".join(random.choice(characters) for _ in range(length))
+    return random_string
