@@ -2,8 +2,8 @@ import asyncio
 import socket
 from typing import Optional
 
-from app.handler.arg_parser import ServerInfo
-from app.processor.command import CommandProcessor
+from app.handler.server_conf import ServerInfo
+from app.processor.command import PING_REQUEST_BYTES, CommandProcessor
 
 
 async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
@@ -19,8 +19,63 @@ async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
             await loop.sock_sendall(client, resp)
 
 
+async def get_master_connection(
+    master_address: str, master_port: int
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
+    try:
+        reader, writer = await asyncio.open_connection(master_address, master_port)
+        return reader, writer
+    except ConnectionError as e:
+        print(f"Error connecting to master server: {e}")
+        return None
+
+
+async def connect_with_master(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+):
+    ping: bytes = PING_REQUEST_BYTES
+    writer.write(ping)
+    await writer.drain()
+    master_response: bytes = await reader.readline()
+    print(f"Received response: {master_response.decode()}")
+
+
+async def init_as_slave(master_addr: str, master_port: int) -> None:
+    """## Main method to connect as a slave
+
+    ### Args:
+        - `master_addr (str)`: master address
+        - `master_port (int)`: master port
+    """
+    # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    #     sock.connect((master_addr, master_port))
+    #     request_msg = "ping"
+    #     resp_array = ["\r\n$" + str(len(request_msg)) + "\r\n" + request_msg]
+    #     request = "*" + str(len(resp_array)) + resp_array[0] + "\r\n"
+    #     print(resp_array)
+    #     print(request)
+    #     sock.sendall(request.encode())
+    #     response = sock.recv(1024)
+    #     print(response)
+    reader, writer = await get_master_connection(master_addr, master_port)  # type: ignore
+    if reader and writer:
+        await connect_with_master(reader, writer)
+
+
 async def main_with_event_loop(server_args: ServerInfo) -> None:
     print("Logs from your program will appear here!")
+    if server_args.role == "slave":
+        print(" Spinning up in slave mode....")
+        master_addr = server_args.master_address
+        master_port = server_args.master_port
+        if master_addr and master_port:
+            await init_as_slave(master_addr, master_port)
+        else:
+            raise Exception(
+                f"Slave configuration must have a valid master_adddress(found {master_addr}) and master_port(found({master_port}))"
+            )
+
+    print(" Spinning up in master mode....")
     server_socket: socket.socket = socket.create_server(
         ("localhost", server_args.port), reuse_port=True
     )

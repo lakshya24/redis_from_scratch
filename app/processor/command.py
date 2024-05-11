@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import asyncio
 from dataclasses import asdict
 from typing import List, Tuple
-from app.handler.arg_parser import ServerInfo
+from app.handler.server_conf import ServerInfo
 from app.processor.resp_coder import RespCoder
 from app.storage.storage import (
     STREAM_CONDITIONALS,
@@ -16,6 +16,11 @@ from typing import Optional
 import time
 import enum
 import sys
+
+PING_REQUEST_STR: str = "ping"
+PING_REQUEST_BYTES: bytes = (
+    f"*1{RespCoder.TERMINATOR}${len(PING_REQUEST_STR)}{RespCoder.TERMINATOR}{PING_REQUEST_STR}{RespCoder.TERMINATOR}".encode()
+)
 
 
 class Command(enum.Enum):
