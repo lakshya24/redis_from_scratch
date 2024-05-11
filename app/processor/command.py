@@ -30,6 +30,7 @@ class Command(enum.Enum):
     GET = enum.auto()
     TYPE = enum.auto()
     INFO = enum.auto()
+    REPLCONF = enum.auto()
     XADD = enum.auto()
     XRANGE = enum.auto()
     XREAD = enum.auto()
@@ -63,6 +64,9 @@ class CommandProcessor(ABC):
         elif command_to_exec == Command.INFO.name:
             args = [server_info]
             return Info(args)
+        elif command_to_exec == Command.REPLCONF.name:
+            args = [server_info]
+            return Replconf(args)
         elif command_to_exec == Command.XADD.name:
             return Xadd(args)
         elif command_to_exec == Command.XRANGE.name:
@@ -153,6 +157,17 @@ class Info(CommandProcessor):
             info: str = f"{key}:{val}{RespCoder.TERMINATOR}"
             info_data += info
         return RespCoder.encode_as_simple_str(info_data).encode()
+
+
+class Replconf(CommandProcessor):
+    OK_RESPONSE: str = f"+OK{RespCoder.TERMINATOR}"
+
+    def __init__(self, message) -> None:
+        self.server_info: ServerInfo = message[0]
+
+    async def response(self) -> bytes:
+        print(f"Replconf request on master")
+        return self.OK_RESPONSE.encode()
 
 
 class Xadd(CommandProcessor):
