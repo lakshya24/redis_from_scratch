@@ -30,9 +30,19 @@ async def get_master_connection(
         return None
 
 
-async def connect_with_master(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-):
+async def replconf_master(reader, writer, count, port: int):
+    replconf: bytes = b""
+    if count == 0:
+        replconf = f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{str(port)}\r\n".encode()
+    elif count == 1:
+        replconf = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
+    writer.write(replconf)
+    await writer.drain()
+    master_response: bytes = await reader.readline()
+    print(f"Received response: {master_response.decode()}")
+
+
+async def ping_master(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     ping: bytes = PING_REQUEST_BYTES
     writer.write(ping)
     await writer.drain()
@@ -40,7 +50,7 @@ async def connect_with_master(
     print(f"Received response: {master_response.decode()}")
 
 
-async def init_as_slave(master_addr: str, master_port: int) -> None:
+async def init_as_slave(server_args: ServerInfo) -> None:
     """## Main method to connect as a slave
 
     ### Args:
@@ -57,9 +67,11 @@ async def init_as_slave(master_addr: str, master_port: int) -> None:
     #     sock.sendall(request.encode())
     #     response = sock.recv(1024)
     #     print(response)
-    reader, writer = await get_master_connection(master_addr, master_port)  # type: ignore
+    reader, writer = await get_master_connection(server_args.master_address, server_args.master_port)  # type: ignore
     if reader and writer:
-        await connect_with_master(reader, writer)
+        await ping_master(reader, writer)
+        await replconf_master(reader, writer, 0, server_args.port)
+        await replconf_master(reader, writer, 1, server_args.port)
 
 
 async def main_with_event_loop(server_args: ServerInfo) -> None:
@@ -69,7 +81,7 @@ async def main_with_event_loop(server_args: ServerInfo) -> None:
         master_addr = server_args.master_address
         master_port = server_args.master_port
         if master_addr and master_port:
-            await init_as_slave(master_addr, master_port)
+            await init_as_slave(server_args)
         else:
             raise Exception(
                 f"Slave configuration must have a valid master_adddress(found {master_addr}) and master_port(found({master_port}))"
