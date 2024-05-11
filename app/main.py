@@ -3,12 +3,12 @@ from argparse import ArgumentParser, Namespace
 import socket
 import asyncio
 
-from app.handler.arg_parser import ServerInfo, get_args, get_args_parser
+from app.handler.arg_parser import ServerInfo, get_server_info, get_args_parser
 from app.handler.handler import main_with_event_loop
 
 
 if __name__ == "__main__":
     # asyncio.run(main())
-    server_args: ServerInfo = get_args()
+    server_args: ServerInfo = get_server_info()
 
     asyncio.run(main_with_event_loop(server_args))
