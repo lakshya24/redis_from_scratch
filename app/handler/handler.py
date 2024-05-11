@@ -2,8 +2,9 @@ import asyncio
 import socket
 from typing import Optional
 
+from app.handler.master_sync_handelr import ping_master, psync_master, replconf_master
 from app.handler.server_conf import ServerInfo
-from app.processor.command import PING_REQUEST_BYTES, CommandProcessor
+from app.processor.command import CommandProcessor
 
 
 async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
@@ -17,37 +18,6 @@ async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
             resp: bytes = await command.response()
             print(f"Got response as : {resp}")
             await loop.sock_sendall(client, resp)
-
-
-async def get_master_connection(
-    master_address: str, master_port: int
-) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
-    try:
-        reader, writer = await asyncio.open_connection(master_address, master_port)
-        return reader, writer
-    except ConnectionError as e:
-        print(f"Error connecting to master server: {e}")
-        return None
-
-
-async def replconf_master(reader, writer, count, port: int):
-    replconf: bytes = b""
-    if count == 0:
-        replconf = f"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$4\r\n{str(port)}\r\n".encode()
-    elif count == 1:
-        replconf = b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n"
-    writer.write(replconf)
-    await writer.drain()
-    master_response: bytes = await reader.readline()
-    print(f"Received response: {master_response.decode()}")
-
-
-async def ping_master(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    ping: bytes = PING_REQUEST_BYTES
-    writer.write(ping)
-    await writer.drain()
-    master_response: bytes = await reader.readline()
-    print(f"Received response: {master_response.decode()}")
 
 
 async def init_as_slave(server_args: ServerInfo) -> None:
@@ -72,6 +42,7 @@ async def init_as_slave(server_args: ServerInfo) -> None:
         await ping_master(reader, writer)
         await replconf_master(reader, writer, 0, server_args.port)
         await replconf_master(reader, writer, 1, server_args.port)
+        await psync_master(reader, writer)
 
 
 async def main_with_event_loop(server_args: ServerInfo) -> None:
