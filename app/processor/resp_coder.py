@@ -15,3 +15,7 @@ class RespCoder:
                 encoded_str.append(RespCoder.encode(entry))
             joined_str: str = "".join(encoded_str)
             return f"*{len(encoded_str)}{cls.TERMINATOR}{joined_str}"
+
+    @classmethod
+    def encode_as_simple_str(cls, data: str) -> str:
+        return f"${len(data)}{cls.TERMINATOR}{data}{cls.TERMINATOR}"

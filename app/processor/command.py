@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 import asyncio
+from dataclasses import asdict
 from typing import List, Tuple
+from app.handler.arg_parser import ServerInfo
 from app.processor.resp_coder import RespCoder
 from app.storage.storage import (
     STREAM_CONDITIONALS,
@@ -22,6 +24,7 @@ class Command(enum.Enum):
     SET = enum.auto()
     GET = enum.auto()
     TYPE = enum.auto()
+    INFO = enum.auto()
     XADD = enum.auto()
     XRANGE = enum.auto()
     XREAD = enum.auto()
@@ -34,13 +37,13 @@ class CommandProcessor(ABC):
         pass
 
     @classmethod
-    def parse(cls, input: bytes):
+    def parse(cls, input: bytes, server_info: ServerInfo):
         command = input.decode()
         commands: List[str] = command.split(RespCoder.TERMINATOR)
         # all everything now including bulk strings
         command_to_exec: str = commands[2].strip().upper()
         # adjust to only extract command params from the format (len,param)
-        args: List[str] = [val for idx, val in enumerate(commands[4:]) if idx % 2 == 0]
+        args: List = [val for idx, val in enumerate(commands[4:]) if idx % 2 == 0]
         print(f"command: {command_to_exec}, args = {args}")
         if command_to_exec == Command.ECHO.name:
             return Echo(args)
@@ -52,6 +55,9 @@ class CommandProcessor(ABC):
             return Set(args)
         elif command_to_exec == Command.TYPE.name:
             return Type(args)
+        elif command_to_exec == Command.INFO.name:
+            args = [server_info]
+            return Info(args)
         elif command_to_exec == Command.XADD.name:
             return Xadd(args)
         elif command_to_exec == Command.XRANGE.name:
@@ -125,6 +131,23 @@ class Type(CommandProcessor):
         if val:
             return f"+{val.type}{RespCoder.TERMINATOR}".encode()
         return f"+none{RespCoder.TERMINATOR}".encode()
+
+
+class Info(CommandProcessor):
+    def __init__(self, message) -> None:
+
+        self.server_info: ServerInfo = message[0]
+        self.info_keys = ["role"]
+
+    async def response(self) -> bytes:
+        print(f"info messag is : {self.server_info}")
+        info_data: str = ""
+        server_info = asdict(self.server_info)
+        for key in self.info_keys:
+            val = str(server_info[key])
+            info: str = f"{key}:{val}{RespCoder.TERMINATOR}"
+            info_data += info
+        return RespCoder.encode_as_simple_str(info_data).encode()
 
 
 class Xadd(CommandProcessor):

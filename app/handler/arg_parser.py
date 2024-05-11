@@ -3,8 +3,9 @@ from argparse import ArgumentParser, Namespace
 
 
 @dataclass
-class RedisServerArgs:
+class ServerInfo:
     port: int
+    role: str = "master"
 
 
 def get_args_parser() -> ArgumentParser:
@@ -15,6 +16,6 @@ def get_args_parser() -> ArgumentParser:
     return parser
 
 
-def get_args() -> RedisServerArgs:
+def get_args() -> ServerInfo:
     parsed_args: Namespace = get_args_parser().parse_args()
-    return RedisServerArgs(port=parsed_args.port)
+    return ServerInfo(port=parsed_args.port)

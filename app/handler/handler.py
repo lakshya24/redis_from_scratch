@@ -2,16 +2,16 @@ import asyncio
 import socket
 from typing import Optional
 
-from app.handler.arg_parser import RedisServerArgs
+from app.handler.arg_parser import ServerInfo
 from app.processor.command import CommandProcessor
 
 
-async def handle_response(client: socket.socket, addr):
+async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
     print(f"listening to address : {addr}")
     loop = asyncio.get_event_loop()
     while req := await loop.sock_recv(client, 1024):
         print("Received request", req, client)
-        command: Optional[CommandProcessor] = CommandProcessor.parse(req)
+        command: Optional[CommandProcessor] = CommandProcessor.parse(req, server_info)
         if command:
             print(f"Got command as : {command}")
             resp: bytes = await command.response()
@@ -19,7 +19,7 @@ async def handle_response(client: socket.socket, addr):
             await loop.sock_sendall(client, resp)
 
 
-async def main_with_event_loop(server_args: RedisServerArgs) -> None:
+async def main_with_event_loop(server_args: ServerInfo) -> None:
     print("Logs from your program will appear here!")
     server_socket: socket.socket = socket.create_server(
         ("localhost", server_args.port), reuse_port=True
@@ -29,7 +29,7 @@ async def main_with_event_loop(server_args: RedisServerArgs) -> None:
     loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
     while True:
         conn, addr = await loop.sock_accept(server_socket)
-        loop.create_task(handle_response(conn, addr))
+        loop.create_task(handle_response(conn, addr, server_args))
 
 
 ##### V1 start ####
