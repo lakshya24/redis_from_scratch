@@ -31,6 +31,7 @@ class Command(enum.Enum):
     TYPE = enum.auto()
     INFO = enum.auto()
     REPLCONF = enum.auto()
+    PSYNC = enum.auto()
     XADD = enum.auto()
     XRANGE = enum.auto()
     XREAD = enum.auto()
@@ -67,6 +68,9 @@ class CommandProcessor(ABC):
         elif command_to_exec == Command.REPLCONF.name:
             args = [server_info]
             return Replconf(args)
+        elif command_to_exec == Command.PSYNC.name:
+            args = [server_info, args]
+            return Psync(args)
         elif command_to_exec == Command.XADD.name:
             return Xadd(args)
         elif command_to_exec == Command.XRANGE.name:
@@ -168,6 +172,23 @@ class Replconf(CommandProcessor):
     async def response(self) -> bytes:
         print(f"Replconf request on master")
         return self.OK_RESPONSE.encode()
+
+
+class Psync(CommandProcessor):
+    FULLRESYNC: str = "FULLRESYNC"
+
+    def __init__(self, message) -> None:
+        self.server_info: ServerInfo = message[0]
+        self.args: List = message[1]
+
+    async def response(self) -> bytes:
+        print(f"Psync request on master....")
+        if (len(self.args) < 2) or (self.args[0] != "?" and self.args[1] != "-1"):
+            print("Invalid psync request")
+            return f"+ERR Invalid PSNC request with params {self.args[0]} and {self.args[1]}".encode()
+        master_replid: str = self.server_info.master_replid
+        master_repl_offset: str = str(self.server_info.master_repl_offset)
+        return f"+{self.FULLRESYNC} {master_replid} {master_repl_offset}{RespCoder.TERMINATOR}".encode()
 
 
 class Xadd(CommandProcessor):
