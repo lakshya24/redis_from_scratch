@@ -1,11 +1,12 @@
 import asyncio
+from typing import Optional
 
 from app.processor.resp_coder import PING_REQUEST_BYTES
 
 
 async def get_master_connection(
     master_address: str, master_port: int
-) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
+) -> Optional[tuple[asyncio.StreamReader, asyncio.StreamWriter]]:
     try:
         reader, writer = await asyncio.open_connection(master_address, master_port)
         return reader, writer

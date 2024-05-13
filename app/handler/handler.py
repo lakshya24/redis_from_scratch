@@ -1,6 +1,7 @@
 import asyncio
+from dataclasses import dataclass
 import socket
-from typing import Optional
+from typing import Any, List, Optional
 
 from app.handler.master_sync_handelr import (
     ping_master,
@@ -8,15 +9,25 @@ from app.handler.master_sync_handelr import (
     replconf_master,
     get_master_connection,
 )
+from app.handler.redis_handler import RedisServer
 from app.handler.server_conf import ServerInfo
-from app.processor.command import CommandProcessor
+from app.processor.command import Command, CommandProcessor
+
+REPLICAS: List = []
+
+
+@dataclass
+class REPLICA_CONF:
+    conn: socket.socket
 
 
 async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
+    print(f"replicas: {REPLICAS}")
+    print(f"serverinfo: {server_info}")
     print(f"listening to address : {addr}")
     loop = asyncio.get_event_loop()
     while req := await loop.sock_recv(client, 1024):
-        print("Received request", req, client)
+        print("Received request on master....", req, client)
         command: Optional[CommandProcessor] = CommandProcessor.parse(req, server_info)
         if command:
             print(f"Got command as : {command}")
@@ -27,9 +38,18 @@ async def handle_response(client: socket.socket, addr, server_info: ServerInfo):
             if followup:
                 print("[*****] no win followup")
                 await loop.sock_sendall(client, followup)
+            if server_info.role == "master":
+                if command.command == Command.REPLCONF:
+                    print("appending replicas")
+                    REPLICAS.append(REPLICA_CONF(conn=client))
+                    print(f"replicas: {REPLICAS}")
+                elif command.command == Command.SET:
+                    print(f"replicas: {REPLICAS}")
+                    for replica in REPLICAS:
+                        replica.conn.sendall(req)
 
 
-async def init_as_slave(server_args: ServerInfo) -> None:
+async def init_as_slave_with_handshake(server_args: ServerInfo) -> None:
     """## Main method to connect as a slave
 
     ### Args:
@@ -48,10 +68,17 @@ async def init_as_slave(server_args: ServerInfo) -> None:
     #     print(response)
     reader, writer = await get_master_connection(server_args.master_address, server_args.master_port)  # type: ignore
     if reader and writer:
+        print("handshaking as slave...")
         await ping_master(reader, writer)
         await replconf_master(reader, writer, 0, server_args.port)
         await replconf_master(reader, writer, 1, server_args.port)
         await psync_master(reader, writer)
+
+
+async def start_redis_server(config: ServerInfo) -> None:
+    server = RedisServer(config)
+    print(f"Server is starting on :{config.port}")
+    await server.start()
 
 
 async def main_with_event_loop(server_args: ServerInfo) -> None:
@@ -61,7 +88,7 @@ async def main_with_event_loop(server_args: ServerInfo) -> None:
         master_addr = server_args.master_address
         master_port = server_args.master_port
         if master_addr and master_port:
-            await init_as_slave(server_args)
+            await init_as_slave_with_handshake(server_args)
         else:
             raise Exception(
                 f"Slave configuration must have a valid master_adddress(found {master_addr}) and master_port(found({master_port}))"
@@ -75,7 +102,10 @@ async def main_with_event_loop(server_args: ServerInfo) -> None:
     server_socket.listen()
     loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
     while True:
+        print("adding new connextions here")
         conn, addr = await loop.sock_accept(server_socket)
+        conn.setblocking(False)
+        # create_task(client_request_handler(conn, loop, addr, server_args))
         loop.create_task(handle_response(conn, addr, server_args))
 
 

@@ -36,9 +36,11 @@ class Command(enum.Enum):
     XADD = enum.auto()
     XRANGE = enum.auto()
     XREAD = enum.auto()
+    NONE = enum.auto()
 
 
 class CommandProcessor(ABC):
+    command: Command = Command.NONE
 
     @abstractmethod
     async def response(self) -> Tuple[bytes, bytes]:
@@ -56,7 +58,7 @@ class CommandProcessor(ABC):
         if command_to_exec == Command.ECHO.name:
             return Echo(args)
         elif command_to_exec == Command.PING.name:
-            return Ping()
+            return Ping([])
         elif command_to_exec == Command.GET.name:
             return Get(args)
         elif command_to_exec == Command.SET.name:
@@ -67,7 +69,7 @@ class CommandProcessor(ABC):
             args = [server_info]
             return Info(args)
         elif command_to_exec == Command.REPLCONF.name:
-            args = [server_info]
+            # args = [server_info]
             return Replconf(args)
         elif command_to_exec == Command.PSYNC.name:
             args = [server_info, args]
@@ -81,11 +83,10 @@ class CommandProcessor(ABC):
 
 
 async def get_followup_response(followup_code: FollowupCode) -> bytes:
-    match followup_code:
-        case FollowupCode.NO_FOLLOWUP:
-            return EMPTY_BYTE
-        case FollowupCode.SEND_RDB:
-            return await Psync.rdb_sync()
+    if followup_code == FollowupCode.NO_FOLLOWUP:
+        return EMPTY_BYTE
+    elif followup_code == FollowupCode.SEND_RDB:
+        return await Psync.rdb_sync()
     return EMPTY_BYTE
 
 
@@ -95,8 +96,13 @@ class Ping(CommandProcessor):
             FollowupCode.NO_FOLLOWUP
         )
 
+    def __init__(self, message) -> None:
+        self.message = message
+
 
 class Echo(CommandProcessor):
+    command = Command.ECHO
+
     async def response(self) -> Tuple[bytes, bytes]:
         if isinstance(self.message, list):
             self.message = "".join(self.message)
@@ -110,6 +116,8 @@ class Echo(CommandProcessor):
 
 
 class Set(CommandProcessor):
+    command = Command.SET
+
     async def response(self) -> Tuple[bytes, bytes]:
 
         val_len = len(self.val)
@@ -134,6 +142,8 @@ class Set(CommandProcessor):
 
 
 class Get(CommandProcessor):
+    command = Command.GET
+
     async def response(self) -> Tuple[bytes, bytes]:
         key: str = "".join(self.message)
         val: Optional[Entry] = kvPair.get(key)
@@ -156,6 +166,8 @@ class Get(CommandProcessor):
 
 
 class Type(CommandProcessor):
+    command = Command.TYPE
+
     def __init__(self, message) -> None:
         self.message = message
 
@@ -173,8 +185,10 @@ class Type(CommandProcessor):
 
 
 class Info(CommandProcessor):
-    def __init__(self, message) -> None:
+    command = Command.INFO
 
+    def __init__(self, message) -> None:
+        self.message = message
         self.server_info: ServerInfo = message[0]
         self.info_keys = ["role", "master_replid", "master_repl_offset"]
 
@@ -183,7 +197,10 @@ class Info(CommandProcessor):
         info_data: str = ""
         server_info = asdict(self.server_info)
         for key in self.info_keys:
-            val = str(server_info[key])
+            if key == "role":
+                val = server_info[key].value
+            else:
+                val = str(server_info[key])
             info: str = f"{key}:{val}{RespCoder.TERMINATOR}"
             info_data += info
         return RespCoder.encode_as_simple_str(
@@ -192,10 +209,12 @@ class Info(CommandProcessor):
 
 
 class Replconf(CommandProcessor):
+    command = Command.REPLCONF
     OK_RESPONSE: str = f"+OK{RespCoder.TERMINATOR}"
 
     def __init__(self, message) -> None:
-        self.server_info: ServerInfo = message[0]
+        self.message = message
+        # self.server_info: ServerInfo = message[0]
 
     async def response(self) -> Tuple[bytes, bytes]:
         print(f"Replconf request on master")
@@ -205,10 +224,12 @@ class Replconf(CommandProcessor):
 
 
 class Psync(CommandProcessor):
+    command = Command.PSYNC
     FULLRESYNC: str = "FULLRESYNC"
     EMPTY_RDB_FILE = b"UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog=="
 
     def __init__(self, message) -> None:
+        self.message = message
         self.server_info: ServerInfo = message[0]
         self.args: List = message[1]
 
@@ -237,6 +258,8 @@ class Psync(CommandProcessor):
 
 
 class Xadd(CommandProcessor):
+    command = Command.XADD
+
     def __init__(self, message) -> None:
         self.message = message
         if not isinstance(self.message, list):
@@ -355,6 +378,8 @@ class Xadd(CommandProcessor):
 
 
 class XRange(CommandProcessor):
+    command = Command.XRANGE
+
     def __init__(self, message) -> None:
         self.message = message
         self.stream_key: str = self.message[0]
@@ -401,6 +426,8 @@ class XRange(CommandProcessor):
 
 
 class XRead(CommandProcessor):
+    command = Command.XREAD
+
     def __init__(self, message) -> None:
         self.message: List[str] = message
         print(f"got xread args:{self.message}")

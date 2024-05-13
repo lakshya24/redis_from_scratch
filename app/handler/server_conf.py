@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from argparse import ArgumentParser, Namespace
 from enum import Enum
 import random
@@ -14,11 +15,14 @@ class ServerRole(Enum):
 @dataclass
 class ServerInfo:
     port: int
-    role: str
+    role: ServerRole
     master_address: Optional[str]
     master_port: Optional[int]
     master_replid: str
     master_repl_offset: int
+    replicas: list[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = field(
+        default_factory=list
+    )
 
 
 def get_args_parser() -> ArgumentParser:
@@ -27,7 +31,7 @@ def get_args_parser() -> ArgumentParser:
         "--port", type=int, default=6379, help="Port number to listen on"
     )
     parser.add_argument(
-        "--replicaof", nargs=2, type=str, required=False, help="replica conf of master"
+        "--replicaof", type=str, required=False, help="replica conf of master"
     )
 
     return parser
@@ -35,11 +39,11 @@ def get_args_parser() -> ArgumentParser:
 
 def get_server_info() -> ServerInfo:
     parsed_args: Namespace = get_args_parser().parse_args()
-    master_address, master_port, role = None, None, "master"
+    master_address, master_port, role = None, None, ServerRole.MASTER
     master_replid, master_repl_offset = generate_random_string(40), 0
     if parsed_args.replicaof:
-        master_address, master_port = parsed_args.replicaof
-        role = "slave"
+        master_address, master_port = parsed_args.replicaof.split()
+        role = ServerRole.SLAVE
         try:
             master_port = int(master_port)
         except ValueError:
