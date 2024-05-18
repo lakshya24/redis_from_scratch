@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import  Optional
+from typing import Optional
 
 from app.handler.master_sync_handelr import ping_master, psync_master, replconf_master
 from app.handler.server_conf import ServerInfo, ServerRole
@@ -9,8 +9,7 @@ from app.processor.resp_coder import RespCoder, parse_input_array_bytes
 
 logging.basicConfig(level=logging.INFO)
 
-CHUNK_SIZE:int = 1024
-
+CHUNK_SIZE: int = 1024
 
 
 class RedisServer:
@@ -23,9 +22,9 @@ class RedisServer:
 
     async def start(self):
         if self.config.role == ServerRole.SLAVE:
-            #await self.master_link.handshake()  # type: ignore
+            # await self.master_link.handshake()  # type: ignore
             # Now move to a separate task instead of sequential events
-            asyncio.create_task(self.master_link.handshake()) # type: ignore
+            asyncio.create_task(self.master_link.handshake())  # type: ignore
 
         server: asyncio.Server = await asyncio.start_server(
             self.handle_client, "localhost", self.config.port
@@ -44,53 +43,8 @@ class RedisServer:
                 # async for request in self.readlines(reader):
                 if not requestobj:
                     break
-                for request_str in parse_input_array_bytes(requestobj):
-                    request = RespCoder.encode(request_str).encode()
-                    print(f"Request is {request}")
-                    req_command: Optional[CommandProcessor] = CommandProcessor.parse(
-                        request, self.config
-                    )
-                    if req_command:
-                        response, followup = await req_command.response()
-                        logging.info(f"{self.role}:Sending response: {response}")
-                        writer.write(response)
-                        await writer.drain()
-                        if followup:
-                            writer.write(followup)
-
-                        if self.config.role == ServerRole.MASTER:
-
-                            if (
-                                req_command.command == Command.REPLCONF
-                                and "listening-port" in req_command.message
-                            ):
-                                self.config.replicas.append((reader, writer))
-                            if req_command.command == Command.SET:
-                                print("sending replica request...")
-                                await self.propagate_to_replicas(request)
-
-        # while req := await loop.sock_recv(client, 1024):
-        # print("Received request on master....", req, client)
-        # command: Optional[CommandProcessor] = CommandProcessor.parse(req, server_info)
-        # if command:
-        #     print(f"Got command as : {command}")
-        #     resp, followup = await command.response()
-        #     print(f"Got response as : {resp}")
-        #     await loop.sock_sendall(client, resp)
-        #     print(f"followup bytes: {followup}")
-        #     if followup:
-        #         print("[*****] no win followup")
-        #         await loop.sock_sendall(client, followup)
-        #     if server_info.role == "master":
-        #         if command.command ==  Command.REPLCONF:
-        #             print("appending replicas")
-        #             REPLICAS.append(REPLICA_CONF(conn=client))
-        #             print(f"replicas: {REPLICAS}")
-        #         elif command.command ==  Command.SET:
-        #             print(f"replicas: {REPLICAS}")
-        #             for replica in REPLICAS:
-        #                 replica.conn.sendall(req)
-
+                for request_str,offset in parse_input_array_bytes(requestobj):
+                    await self.process_request(reader, writer, request_str)
         except ConnectionResetError:
             logging.error(f"{self.role}:Connection reset by peer: {addr}")
         except Exception as e:
@@ -99,6 +53,30 @@ class RedisServer:
             writer.close()
             await writer.wait_closed()
             logging.info("{self.role}:Connection closed")
+
+    async def process_request(self, reader, writer, request_str):
+        request = RespCoder.encode(request_str).encode()
+        print(f"Request is {request}")
+        req_command: Optional[CommandProcessor] = CommandProcessor.parse(
+            request, self.config
+        )
+        if req_command:
+            response, followup = await req_command.response()
+            logging.info(f"{self.role}:Sending response: {response}")
+            writer.write(response)
+            await writer.drain()
+            if followup:
+                writer.write(followup)
+
+            if self.config.role == ServerRole.MASTER:
+                if (
+                    req_command.command == Command.REPLCONF
+                    and "listening-port" in req_command.message
+                ):
+                    self.config.replicas.append((reader, writer))
+                if req_command.command == Command.SET:
+                    print("sending replica request...")
+                    await self.propagate_to_replicas(request)
 
     async def propagate_to_replicas(self, request):
         print(f"Replicas are: {len(self.config.replicas)} ")
@@ -118,6 +96,7 @@ class RedisReplica:
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
         self.role = self.config.role.value
+        self.offset =0
 
     async def connect(self):
         self.reader, self.writer = await asyncio.open_connection(
@@ -130,23 +109,34 @@ class RedisReplica:
         addr = self.writer.get_extra_info("peername")
         try:
             while requestobj := await self.reader.read(CHUNK_SIZE):
-                for request_str in parse_input_array_bytes(requestobj):
+                for request_str,offset in parse_input_array_bytes(requestobj):
+                    
                     request = RespCoder.encode(request_str).encode()
                     print(f"Request is {request}")
                     if not request:
                         print("{self.role}:no requests found....")
                         break
-                    logging.info(f"{self.role}:Received master request\r\n>> {request}\r\n")
+                    logging.info(
+                        f"{self.role}:Received master request\r\n>> {request}\r\n"
+                    )
                     req_command: Optional[CommandProcessor] = CommandProcessor.parse(
                         request, self.config
                     )
                     print(f"parsed command {req_command}")
                     if req_command:
-                        response, followup = await req_command.response()
-                        logging.info(f"{self.role}:Sending response: {response}")
-                        self.writer.write(response)
-                        await self.writer.drain()
-        
+                        if req_command.command == Command.REPLCONF and "GETACK" in req_command.message:
+                            req_command.message = [str(self.offset)] +[*req_command.message]
+                            response, followup = await req_command.response()
+                            logging.info(f"{self.role}:Sending response: {response}")
+                            ## respond to master only for ACKs 
+                            self.writer.write(response)
+                            await self.writer.drain()
+                        else:
+                            response, followup = await req_command.response()
+                        self.offset += offset
+                        
+                    
+
         except ConnectionResetError:
             logging.error(f"{ self.role}:Connection reset by peer: {addr}")
         except Exception as e:

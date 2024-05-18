@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 
 
 class RespCoder:
@@ -22,13 +22,14 @@ class RespCoder:
         return f"${len(data)}{cls.TERMINATOR}{data}{cls.TERMINATOR}"
 
 
-def parse_input_array_bytes(data: bytes):
+def parse_input_array_bytes(data: bytes)-> List[Tuple[bytes,int]]:
     commands = []
     i = 0
     n = len(data)
 
     while i < n:
         if data[i : i + 1] == b"*":
+            command_start = i
             # Read the number of elements in the array
             end_of_line = data.index(b"\r\n", i)
             num_elements = int(data[i + 1 : end_of_line].decode())
@@ -47,7 +48,8 @@ def parse_input_array_bytes(data: bytes):
                     argument = data[i : i + str_length].decode()
                     command.append(argument)
                     i += str_length + 2  # Move to the end of the string and skip \r\n
-            commands.append(command)
+            command_end = i
+            commands.append((command,command_end-command_start))
     return commands
 
 

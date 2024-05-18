@@ -230,13 +230,17 @@ class Replconf(CommandProcessor):
         #     FollowupCode.NO_FOLLOWUP
         # )
         if "GETACK" in self.message:
-            return "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(), await get_followup_response(
-            FollowupCode.NO_FOLLOWUP
+            response = ["REPLCONF", "ACK", str(self.message[0])]
+            return (
+                RespCoder.encode(response).encode(),
+                #"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(),
+                await get_followup_response(FollowupCode.NO_FOLLOWUP),
             )
         else:
-           return self.OK_RESPONSE.encode(), await get_followup_response(
-            FollowupCode.NO_FOLLOWUP
-        )
+            return self.OK_RESPONSE.encode(), await get_followup_response(
+                FollowupCode.NO_FOLLOWUP
+            )
+
 
 class Psync(CommandProcessor):
     command = Command.PSYNC
