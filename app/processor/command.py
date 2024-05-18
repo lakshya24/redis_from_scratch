@@ -38,6 +38,7 @@ class Command(enum.Enum):
     XREAD = enum.auto()
     NONE = enum.auto()
     GETACK = enum.auto()
+    WAIT = enum.auto()
 
 
 class CommandProcessor(ABC):
@@ -84,6 +85,8 @@ class CommandProcessor(ABC):
             return XRange(args)
         elif command_to_exec == Command.XREAD.name:
             return XRead(args)
+        elif command_to_exec == Command.WAIT.name:
+            return Wait(args)
 
 
 async def get_followup_response(followup_code: FollowupCode) -> bytes:
@@ -233,7 +236,7 @@ class Replconf(CommandProcessor):
             response = ["REPLCONF", "ACK", str(self.message[0])]
             return (
                 RespCoder.encode(response).encode(),
-                #"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(),
+                # "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(),
                 await get_followup_response(FollowupCode.NO_FOLLOWUP),
             )
         else:
@@ -530,3 +533,16 @@ class XRead(CommandProcessor):
     ) -> bool:
         stream_id: str = entry.stream_id
         return stream_id >= start_range and stream_id <= end_range
+
+
+class Wait(CommandProcessor):
+    command = Command.WAIT
+
+    def __init__(self, message) -> None:
+        self.message = message
+
+    async def response(self) -> Tuple[bytes, bytes]:
+        return (
+            RespCoder.encode(int(self.message[0])).encode(),
+            await get_followup_response(FollowupCode.NO_FOLLOWUP),
+        )

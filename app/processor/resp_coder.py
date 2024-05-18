@@ -7,6 +7,8 @@ class RespCoder:
 
     @classmethod
     def encode(cls, data) -> str:
+        if isinstance(data, int):
+            return f":+{data}{cls.TERMINATOR}"
         if isinstance(data, str):
             return f"${len(data)}{cls.TERMINATOR}{data}{cls.TERMINATOR}"
         elif isinstance(data, list):
@@ -22,7 +24,7 @@ class RespCoder:
         return f"${len(data)}{cls.TERMINATOR}{data}{cls.TERMINATOR}"
 
 
-def parse_input_array_bytes(data: bytes)-> List[Tuple[bytes,int]]:
+def parse_input_array_bytes(data: bytes) -> List[Tuple[bytes, int]]:
     commands = []
     i = 0
     n = len(data)
@@ -49,7 +51,7 @@ def parse_input_array_bytes(data: bytes)-> List[Tuple[bytes,int]]:
                     command.append(argument)
                     i += str_length + 2  # Move to the end of the string and skip \r\n
             command_end = i
-            commands.append((command,command_end-command_start))
+            commands.append((command, command_end - command_start))
     return commands
 
 

@@ -43,7 +43,7 @@ class RedisServer:
                 # async for request in self.readlines(reader):
                 if not requestobj:
                     break
-                for request_str,offset in parse_input_array_bytes(requestobj):
+                for request_str, offset in parse_input_array_bytes(requestobj):
                     await self.process_request(reader, writer, request_str)
         except ConnectionResetError:
             logging.error(f"{self.role}:Connection reset by peer: {addr}")
@@ -96,7 +96,7 @@ class RedisReplica:
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
         self.role = self.config.role.value
-        self.offset =0
+        self.offset = 0
 
     async def connect(self):
         self.reader, self.writer = await asyncio.open_connection(
@@ -109,8 +109,8 @@ class RedisReplica:
         addr = self.writer.get_extra_info("peername")
         try:
             while requestobj := await self.reader.read(CHUNK_SIZE):
-                for request_str,offset in parse_input_array_bytes(requestobj):
-                    
+                for request_str, offset in parse_input_array_bytes(requestobj):
+
                     request = RespCoder.encode(request_str).encode()
                     print(f"Request is {request}")
                     if not request:
@@ -124,18 +124,21 @@ class RedisReplica:
                     )
                     print(f"parsed command {req_command}")
                     if req_command:
-                        if req_command.command == Command.REPLCONF and "GETACK" in req_command.message:
-                            req_command.message = [str(self.offset)] +[*req_command.message]
+                        if (
+                            req_command.command == Command.REPLCONF
+                            and "GETACK" in req_command.message
+                        ):
+                            req_command.message = [str(self.offset)] + [
+                                *req_command.message
+                            ]
                             response, followup = await req_command.response()
                             logging.info(f"{self.role}:Sending response: {response}")
-                            ## respond to master only for ACKs 
+                            ## respond to master only for ACKs
                             self.writer.write(response)
                             await self.writer.drain()
                         else:
                             response, followup = await req_command.response()
                         self.offset += offset
-                        
-                    
 
         except ConnectionResetError:
             logging.error(f"{ self.role}:Connection reset by peer: {addr}")
