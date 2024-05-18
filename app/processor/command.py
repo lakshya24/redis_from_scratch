@@ -49,7 +49,7 @@ class CommandProcessor(ABC):
         pass
 
     @classmethod
-    def parse(cls, input: bytes, server_info: ServerInfo):
+    def get_command(cls, input: bytes, server_info: ServerInfo):
         command = input.decode()
         commands: List[str] = command.split(RespCoder.TERMINATOR)
         # all everything now including bulk strings
@@ -86,7 +86,7 @@ class CommandProcessor(ABC):
         elif command_to_exec == Command.XREAD.name:
             return XRead(args)
         elif command_to_exec == Command.WAIT.name:
-            return Wait(args)
+            return Wait([str(len(server_info.replicas))])
 
 
 async def get_followup_response(followup_code: FollowupCode) -> bytes:

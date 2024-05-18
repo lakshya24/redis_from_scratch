@@ -57,7 +57,7 @@ class RedisServer:
     async def process_request(self, reader, writer, request_str):
         request = RespCoder.encode(request_str).encode()
         print(f"Request is {request}")
-        req_command: Optional[CommandProcessor] = CommandProcessor.parse(
+        req_command: Optional[CommandProcessor] = CommandProcessor.get_command(
             request, self.config
         )
         if req_command:
@@ -119,8 +119,8 @@ class RedisReplica:
                     logging.info(
                         f"{self.role}:Received master request\r\n>> {request}\r\n"
                     )
-                    req_command: Optional[CommandProcessor] = CommandProcessor.parse(
-                        request, self.config
+                    req_command: Optional[CommandProcessor] = (
+                        CommandProcessor.get_command(request, self.config)
                     )
                     print(f"parsed command {req_command}")
                     if req_command:
