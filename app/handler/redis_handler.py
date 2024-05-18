@@ -55,7 +55,6 @@ class RedisServer:
                         writer.write(response)
                         await writer.drain()
                         if followup:
-                            print("[*****] no win followup")
                             writer.write(followup)
 
                         if self.config.role == ServerRole.MASTER:
@@ -64,7 +63,6 @@ class RedisServer:
                                 req_command.command == Command.REPLCONF
                                 and "listening-port" in req_command.message
                             ):
-                                print("[***] INITIALIZAING REPLICAS.....")
                                 self.config.replicas.append((reader, writer))
                             if req_command.command == Command.SET:
                                 print("sending replica request...")
@@ -145,8 +143,8 @@ class RedisReplica:
                     if req_command:
                         response, followup = await req_command.response()
                         logging.info(f"Sending response: {response}")
-                        # self.writer.write(response)
-                        # await self.writer.drain()
+                        self.writer.write(response)
+                        await self.writer.drain()
         
         except ConnectionResetError:
             logging.error(f"{ self.role}:Connection reset by peer: {addr}")

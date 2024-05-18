@@ -37,6 +37,7 @@ class Command(enum.Enum):
     XRANGE = enum.auto()
     XREAD = enum.auto()
     NONE = enum.auto()
+    GETACK = enum.auto()
 
 
 class CommandProcessor(ABC):
@@ -70,6 +71,9 @@ class CommandProcessor(ABC):
             return Info(args)
         elif command_to_exec == Command.REPLCONF.name:
             # args = [server_info]
+            # if Command.GETACK.name in args:
+            #         print("[***] Returning ack based data...")
+            #         return Replconf(["ACK", "0"])
             return Replconf(args)
         elif command_to_exec == Command.PSYNC.name:
             args = [server_info, args]
@@ -217,11 +221,27 @@ class Replconf(CommandProcessor):
         # self.server_info: ServerInfo = message[0]
 
     async def response(self) -> Tuple[bytes, bytes]:
-        print(f"Replconf request on master")
-        return self.OK_RESPONSE.encode(), await get_followup_response(
+        # if "ACK" in self.message:
+        #     print(" IN replconf ack code")
+        #     return "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(),await get_followup_response(
+        #     FollowupCode.NO_FOLLOWUP
+        # )
+        # return self.OK_RESPONSE.encode(), await get_followup_response(
+        #     FollowupCode.NO_FOLLOWUP
+        # )
+        if "GETACK" in self.message:
+            return "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+            )
+            # old_writer.write(bulk_array(["REPLCONF", "ACK", "0"]))
+        elif "ACK" in self.message:
+            return self.OK_RESPONSE.encode(), await get_followup_response(
             FollowupCode.NO_FOLLOWUP
         )
-
+        else:
+           return self.OK_RESPONSE.encode(), await get_followup_response(
+            FollowupCode.NO_FOLLOWUP
+        )
 
 class Psync(CommandProcessor):
     command = Command.PSYNC
