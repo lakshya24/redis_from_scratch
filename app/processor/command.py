@@ -31,6 +31,7 @@ class Command(enum.Enum):
     GET = enum.auto()
     TYPE = enum.auto()
     INFO = enum.auto()
+    CONFIG = enum.auto()
     REPLCONF = enum.auto()
     PSYNC = enum.auto()
     XADD = enum.auto()
@@ -87,6 +88,8 @@ class CommandProcessor(ABC):
             return XRead(args)
         elif command_to_exec == Command.WAIT.name:
             return Wait([str(len(server_info.replicas))])
+        elif command_to_exec == Command.CONFIG.name:
+            return Config(args, serverConf=server_info)
 
 
 async def get_followup_response(followup_code: FollowupCode) -> bytes:
@@ -546,3 +549,25 @@ class Wait(CommandProcessor):
             RespCoder.encode(int(self.message[0])).encode(),
             await get_followup_response(FollowupCode.NO_FOLLOWUP),
         )
+
+
+class Config(CommandProcessor):
+    command = Command.CONFIG
+
+    def __init__(self, message, serverConf: Optional[ServerInfo] = None) -> None:
+        self.message = message
+        self.serverConf: ServerInfo | None = serverConf
+
+    async def response(self) -> Tuple[bytes, bytes]:
+        if len(self.message) < 2:
+            raise Exception("invalid args")
+        if self.message[0] == "GET":
+            arg = self.message[1]
+            print(f"in getm with {arg}")
+            return (
+                RespCoder.encode(
+                    [f"{arg}", f"{getattr(self.serverConf,arg)}"]
+                ).encode(),
+                await get_followup_response(FollowupCode.NO_FOLLOWUP),
+            )
+        raise Exception("invalid args")

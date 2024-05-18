@@ -20,6 +20,8 @@ class ServerInfo:
     master_port: Optional[int]
     master_replid: str
     master_repl_offset: int
+    dir: str
+    dbfilename: str
     replicas: list[tuple[asyncio.StreamReader, asyncio.StreamWriter]] = field(
         default_factory=list
     )
@@ -32,6 +34,12 @@ def get_args_parser() -> ArgumentParser:
     )
     parser.add_argument(
         "--replicaof", type=str, required=False, help="replica conf of master"
+    )
+    parser.add_argument(
+        "--dir", type=str, default="/tmp/redis-data", help="replconf dir"
+    )
+    parser.add_argument(
+        "--dbfilename", type=str, default="rdbfile", help="replica conf of master"
     )
 
     return parser
@@ -55,6 +63,8 @@ def get_server_info() -> ServerInfo:
         master_port=master_port,
         master_replid=master_replid,
         master_repl_offset=master_repl_offset,
+        dir=parsed_args.dir,
+        dbfilename=parsed_args.dbfilename,
     )
 
 
