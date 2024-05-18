@@ -233,11 +233,6 @@ class Replconf(CommandProcessor):
             return "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n".encode(), await get_followup_response(
             FollowupCode.NO_FOLLOWUP
             )
-            # old_writer.write(bulk_array(["REPLCONF", "ACK", "0"]))
-        elif "ACK" in self.message:
-            return self.OK_RESPONSE.encode(), await get_followup_response(
-            FollowupCode.NO_FOLLOWUP
-        )
         else:
            return self.OK_RESPONSE.encode(), await get_followup_response(
             FollowupCode.NO_FOLLOWUP

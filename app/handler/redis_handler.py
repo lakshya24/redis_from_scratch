@@ -17,6 +17,7 @@ class RedisServer:
     def __init__(self, config: ServerInfo):
         self.config: ServerInfo = config
         self.master_link = None
+        self.role = config.role
         if config.role == ServerRole.SLAVE:
             self.master_link = RedisReplica(config)
 
@@ -36,7 +37,7 @@ class RedisServer:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         addr = writer.get_extra_info("peername")
-        logging.info(f"Request send to {addr}")
+        logging.info(f"{self.role}:Request send to {addr}")
 
         try:
             while requestobj := await reader.read(CHUNK_SIZE):
@@ -51,7 +52,7 @@ class RedisServer:
                     )
                     if req_command:
                         response, followup = await req_command.response()
-                        logging.info(f"Sending response: {response}")
+                        logging.info(f"{self.role}:Sending response: {response}")
                         writer.write(response)
                         await writer.drain()
                         if followup:
@@ -91,24 +92,24 @@ class RedisServer:
         #                 replica.conn.sendall(req)
 
         except ConnectionResetError:
-            logging.error(f"Connection reset by peer: {addr}")
+            logging.error(f"{self.role}:Connection reset by peer: {addr}")
         except Exception as e:
-            logging.error(f"Error handling client {addr}: {e}")
+            logging.error(f"{self.role}:Error handling client {addr}: {e}")
         finally:
             writer.close()
             await writer.wait_closed()
-            logging.info("Connection closed")
+            logging.info("{self.role}:Connection closed")
 
     async def propagate_to_replicas(self, request):
         print(f"Replicas are: {len(self.config.replicas)} ")
         for _, replica_writer in self.config.replicas:
             try:
-                print("writing to replica...")
+                print("{self.role}:writing to replica...")
                 replica_writer.write(request)
                 await replica_writer.drain()
-                print("sent to replica...")
+                print("{self.role}:sent to replica...")
             except Exception as e:
-                logging.error(f"Failed to connect to replica, error: {e}")
+                logging.error(f"{self.role}:Failed to connect to replica, error: {e}")
 
 
 class RedisReplica:
@@ -133,7 +134,7 @@ class RedisReplica:
                     request = RespCoder.encode(request_str).encode()
                     print(f"Request is {request}")
                     if not request:
-                        print("no requests found....")
+                        print("{self.role}:no requests found....")
                         break
                     logging.info(f"{self.role}:Received master request\r\n>> {request}\r\n")
                     req_command: Optional[CommandProcessor] = CommandProcessor.parse(
@@ -142,7 +143,7 @@ class RedisReplica:
                     print(f"parsed command {req_command}")
                     if req_command:
                         response, followup = await req_command.response()
-                        logging.info(f"Sending response: {response}")
+                        logging.info(f"{self.role}:Sending response: {response}")
                         self.writer.write(response)
                         await self.writer.drain()
         
