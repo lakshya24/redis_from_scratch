@@ -66,7 +66,7 @@ class CommandProcessor(ABC):
         elif command_to_exec == Command.PING.name:
             return Ping([])
         elif command_to_exec == Command.GET.name:
-            return Get(args)
+            return Get(os.path.join(server_info.dir, server_info.dbfilename), args)
         elif command_to_exec == Command.SET.name:
             return Set(args)
         elif command_to_exec == Command.TYPE.name:
@@ -164,6 +164,14 @@ class Get(CommandProcessor):
 
     async def response(self) -> Tuple[bytes, bytes]:
         key: str = "".join(self.message)
+        if self.rdb_file_name:
+            if os.path.exists(self.rdb_file_name):
+                rdb_file_processor = RDBFileProcessor(self.rdb_file_name)
+                response = rdb_file_processor.read_value_from_file(key)
+                return (
+                    response.encode(),
+                    await get_followup_response(FollowupCode.NO_FOLLOWUP),
+                )
         val: Optional[Entry] = kvPair.get(key)
         if val:
             found_ttl_ms: float = val.ttl_ms
@@ -179,8 +187,9 @@ class Get(CommandProcessor):
             FollowupCode.NO_FOLLOWUP
         )
 
-    def __init__(self, message) -> None:
+    def __init__(self, rdb_file_name: str, message) -> None:
         self.message = message
+        self.rdb_file_name = rdb_file_name
 
 
 class Type(CommandProcessor):
@@ -593,7 +602,6 @@ class Keys(CommandProcessor):
 
     async def response(self) -> Tuple[bytes, bytes]:
         if os.path.exists(self.rdb_file_name):
-
             if "*" in self.message:
                 rdb_file_processor = RDBFileProcessor(self.rdb_file_name)
                 response = rdb_file_processor.read_key_from_file()
