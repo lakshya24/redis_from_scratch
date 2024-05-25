@@ -4,6 +4,7 @@ import base64
 from dataclasses import asdict
 from typing import List, Tuple
 from app.handler.server_conf import ServerInfo
+from app.processor.rdb_file_processor import RDBFileProcessor
 from app.processor.resp_coder import EMPTY_BYTE, RespCoder
 from app.storage.storage import (
     STREAM_CONDITIONALS,
@@ -17,6 +18,7 @@ from typing import Optional
 import time
 import enum
 import sys
+import os
 
 
 class FollowupCode(enum.Enum):
@@ -40,6 +42,7 @@ class Command(enum.Enum):
     NONE = enum.auto()
     GETACK = enum.auto()
     WAIT = enum.auto()
+    KEYS = enum.auto()
 
 
 class CommandProcessor(ABC):
@@ -90,6 +93,11 @@ class CommandProcessor(ABC):
             return Wait([str(len(server_info.replicas))])
         elif command_to_exec == Command.CONFIG.name:
             return Config(args, serverConf=server_info)
+        elif command_to_exec == Command.KEYS.name:
+            return Keys(
+                args,
+                rdb_file_name=os.path.join(server_info.dir, server_info.dbfilename),
+            )
 
 
 async def get_followup_response(followup_code: FollowupCode) -> bytes:
@@ -570,4 +578,28 @@ class Config(CommandProcessor):
                 ).encode(),
                 await get_followup_response(FollowupCode.NO_FOLLOWUP),
             )
+        raise Exception("invalid args")
+
+
+class Keys(CommandProcessor):
+    command = Command.CONFIG
+
+    def __init__(self, message, rdb_file_name: Optional[str] = None) -> None:
+        self.message = message
+        if rdb_file_name:
+            self.rdb_file_name: str = rdb_file_name
+        else:
+            raise Exception("rdb file name must be specified")
+
+    async def response(self) -> Tuple[bytes, bytes]:
+        if os.path.exists(self.rdb_file_name):
+
+            if "*" in self.message:
+                rdb_file_processor = RDBFileProcessor(self.rdb_file_name)
+                response = rdb_file_processor.read_key_from_file()
+                return (
+                    response.encode(),
+                    await get_followup_response(FollowupCode.NO_FOLLOWUP),
+                )
+
         raise Exception("invalid args")

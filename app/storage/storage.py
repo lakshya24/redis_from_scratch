@@ -1,7 +1,8 @@
+from _collections_abc import dict_keys
 import asyncio
 from dataclasses import dataclass
 import enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 import time
 
 
@@ -45,8 +46,8 @@ class Entry:
 
 
 class Storage:
-    def __init__(self,rdb_file:str) -> None:
-        self._storage: dict[str, Entry] = {}
+    def __init__(self, rdb_file: Optional[str] = None) -> None:
+        self._storage: Dict[str, Entry] = {}
         self.rdb_file = rdb_file
 
     def add(self, key: str, entry_dict: Entry) -> None:
@@ -68,6 +69,6 @@ class Storage:
         del self._storage[key]
 
 
-kvPair: Storage = Storage("app/storage/resources/rdb.hex")
+kvPair: Storage = Storage()
 STREAM_LOCK = asyncio.Lock()
 STREAM_CONDITIONALS = {}
