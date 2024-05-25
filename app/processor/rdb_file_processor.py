@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import Any, Dict, List
 
 
 class RDBFileProcessor:
@@ -8,29 +8,28 @@ class RDBFileProcessor:
     def __init__(self, filename: str):
         self.filename = filename
 
-    def read_key_from_file(self) -> str:
+    def read_keys_from_file(self) -> List[Any]:
         response = ""
+        keys: List[Any] = []
         if os.path.exists(self.filename):
             printable_strings = self.get_printable_words()
+            # print(f"[***LGGGG****] printable chars are {printable_strings}")
             # print(f"[LG****] printable chars are: {printable_strings}")
             # only get first key
-            idx = printable_strings.index("@")
-            key = printable_strings[idx + 1]
-            # value = printable_strings[idx+2]
-            response = f"*1\r\n${len(key)}\r\n{key}\r\n"
-        else:
-            response = self.NO_CONTENT_RESPONSE
-        return response
+            kv_pair = self._extract_kv_pairs(printable_strings)
+            print(f"[****LG****] Kv pairs are : {kv_pair}")
+            keys = list(kv_pair.keys())
+        return keys
 
     def read_value_from_file(self, query_key: str) -> str:
         response = ""
+        values: List[Any] = []
         if os.path.exists(self.filename):
             printable_strings = self.get_printable_words()
             # only get first key
-            idx = printable_strings.index("@")
-            key = printable_strings[idx + 1]
-            value = printable_strings[idx + 2]
-            if key == query_key:
+            kv_pair = self._extract_kv_pairs(printable_strings)
+            if query_key in kv_pair:
+                value = kv_pair[query_key]
                 response = f"${len(value)}\r\n{value}\r\n"
             else:
                 response = self.NO_CONTENT_RESPONSE
@@ -45,6 +44,8 @@ class RDBFileProcessor:
             printable_strings = []
             current_word = ""
             for char in data:
+                if char == 255:
+                    break
                 if 32 <= char <= 126:  # Check if printable ASCII
                     current_word += chr(char)
                 elif (
@@ -56,3 +57,12 @@ class RDBFileProcessor:
             if current_word:
                 printable_strings.append(current_word)
         return printable_strings
+
+    def _extract_kv_pairs(self, parsed_list: List[str]):
+        start_index = parsed_list.index("@") + 1
+        result_dict = {}
+        for i in range(start_index, len(parsed_list), 2):
+            key = parsed_list[i]
+            value = parsed_list[i + 1]
+            result_dict[key] = value
+        return result_dict

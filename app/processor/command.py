@@ -604,9 +604,10 @@ class Keys(CommandProcessor):
         if os.path.exists(self.rdb_file_name):
             if "*" in self.message:
                 rdb_file_processor = RDBFileProcessor(self.rdb_file_name)
-                response = rdb_file_processor.read_key_from_file()
+                keys = rdb_file_processor.read_keys_from_file()
+                resp_response = RespCoder.encode(keys)
                 return (
-                    response.encode(),
+                    resp_response.encode(),
                     await get_followup_response(FollowupCode.NO_FOLLOWUP),
                 )
 
